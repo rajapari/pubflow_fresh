@@ -1,0 +1,308 @@
+name: pubflow
+
+networks:
+  public:
+  app:
+  data:
+  tools:
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  meilisearch_data:
+  keycloak_data:
+  penpot_data:
+  scribus_data:
+
+services:
+
+  # ── PUBLIC GATEWAY ─────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: pubflow_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on: [web, api]
+    networks: [public, app, tools]
+    restart: unless-stopped
+
+  # ── APPLICATION ────────────────────────────────────────
+  web:
+    build:
+      context: ../../
+      dockerfile: apps/web/Dockerfile
+      target: development
+    container_name: pubflow_web
+    ports:
+      - "3000:3000"
+    env_file: ../../.env
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+      - NEXT_PUBLIC_KEYCLOAK_URL=http://localhost:8080
+      - NEXT_PUBLIC_KEYCLOAK_REALM=pubflow
+      - NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=pubflow-web
+    volumes:
+      - ../../apps/web:/app/apps/web
+      - ../../packages:/app/packages
+    depends_on: [api]
+    networks: [app]
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile
+      target: development
+    container_name: pubflow_api
+    ports:
+      - "3001:3001"
+    env_file: ../../.env
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://pubflow:pubflow_secret@postgres:5432/pubflow
+      - REDIS_URL=redis://:redis_secret@redis:6379/0
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=pubflow_minio
+      - MINIO_SECRET_KEY=pubflow_minio_secret
+      - MINIO_BUCKET=pubflow-files
+      - MINIO_USE_SSL=false
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=pubflow
+      - KEYCLOAK_CLIENT_ID=pubflow-api
+      - MEILISEARCH_URL=http://meilisearch:7700
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_FROM=noreply@pubflow.local
+    volumes:
+      - ../../apps/api:/app/apps/api
+      - ../../packages:/app/packages
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    networks: [app, data]
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../../
+      dockerfile: apps/worker/Dockerfile
+      target: development
+    container_name: pubflow_worker
+    env_file: ../../.env
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://pubflow:pubflow_secret@postgres:5432/pubflow
+      - REDIS_URL=redis://:redis_secret@redis:6379/0
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=pubflow_minio
+      - MINIO_SECRET_KEY=pubflow_minio_secret
+      - MINIO_BUCKET=pubflow-files
+      - MINIO_USE_SSL=false
+      - PANDOC_SERVICE_URL=http://pandoc-service:4000
+      - SCRIBUS_SERVICE_URL=http://scribus-headless:5000
+      - LATEX_SERVICE_URL=http://latex:5001
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
+      - SMTP_FROM=noreply@pubflow.local
+      - APP_URL=http://localhost:3000
+    volumes:
+      - ../../apps/worker:/app/apps/worker
+      - ../../packages:/app/packages
+    depends_on: [redis, postgres]
+    networks: [app, data, tools]
+    restart: unless-stopped
+
+  # ── DATA ───────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: pubflow_postgres
+    environment:
+      POSTGRES_USER: pubflow
+      POSTGRES_PASSWORD: pubflow_secret
+      POSTGRES_DB: pubflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pubflow -d pubflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [data]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pubflow_redis
+    command: redis-server --requirepass redis_secret
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_secret", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [data]
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: pubflow_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: pubflow_minio
+      MINIO_ROOT_PASSWORD: pubflow_minio_secret
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks: [data, tools]
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.10
+    container_name: pubflow_meilisearch
+    environment:
+      MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY}
+      MEILI_ENV: development
+    volumes:
+      - meilisearch_data:/meili_data
+    ports:
+      - "7700:7700"
+    networks: [data]
+    restart: unless-stopped
+
+  # ── AUTH ───────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: pubflow_keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/pubflow
+      KC_DB_USERNAME: pubflow
+      KC_DB_PASSWORD: pubflow_secret
+      KC_DB_SCHEMA: keycloak
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - ../../services/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - keycloak_data:/opt/keycloak/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app, data]
+    restart: unless-stopped
+
+  # ── TOOLS ──────────────────────────────────────────────
+  onlyoffice:
+    image: onlyoffice/documentserver:8.1
+    container_name: pubflow_onlyoffice
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
+    ports:
+      - "8081:80"
+    networks: [tools, app]
+    restart: unless-stopped
+
+  languagetool:
+    image: erikvl87/languagetool:latest
+    container_name: pubflow_languagetool
+    ports:
+      - "8082:8010"
+    networks: [tools]
+    restart: unless-stopped
+
+  pandoc-service:
+    build:
+      context: ../../services/pandoc
+      dockerfile: Dockerfile
+    container_name: pubflow_pandoc
+    ports:
+      - "4000:4000"
+    networks: [tools]
+    restart: unless-stopped
+
+  latex:
+    build:
+      context: ../../services/latex
+      dockerfile: Dockerfile
+    container_name: pubflow_latex
+    ports:
+      - "5001:5001"
+    networks: [tools]
+    restart: unless-stopped
+
+  scribus-headless:
+    build:
+      context: ../../services/scribus
+      dockerfile: Dockerfile.headless
+    container_name: pubflow_scribus
+    ports:
+      - "5000:5000"
+    volumes:
+      - scribus_data:/app/output
+    networks: [tools]
+    restart: unless-stopped
+
+  penpot-frontend:
+    image: penpotapp/frontend:2.3.0
+    container_name: pubflow_penpot
+    environment:
+      PENPOT_FLAGS: enable-registration enable-login-with-password
+    ports:
+      - "3449:80"
+    depends_on: [penpot-backend]
+    networks: [tools]
+    restart: unless-stopped
+
+  penpot-backend:
+    image: penpotapp/backend:2.3.0
+    container_name: pubflow_penpot_backend
+    environment:
+      PENPOT_FLAGS: enable-registration enable-login-with-password
+      PENPOT_DATABASE_URI: postgresql://pubflow:pubflow_secret@postgres:5432/pubflow
+      PENPOT_DATABASE_USERNAME: pubflow
+      PENPOT_DATABASE_PASSWORD: pubflow_secret
+      PENPOT_REDIS_URI: redis://:redis_secret@redis:6379/2
+      PENPOT_STORAGE_BACKEND: fs
+      PENPOT_STORAGE_FS_DIRECTORY: /opt/data/assets
+      PENPOT_TELEMETRY_ENABLED: "false"
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
+    volumes:
+      - penpot_data:/opt/data/assets
+    depends_on: [postgres, redis]
+    networks: [tools, data]
+    restart: unless-stopped
+
+  # ── DEV UTILITIES ──────────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: pubflow_mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks: [app]
+    restart: unless-stopped

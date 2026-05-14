@@ -1,0 +1,27 @@
+{
+  "name": "@pubflow/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/worker.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@pubflow/db": "workspace:*",
+    "@pubflow/types": "workspace:*",
+    "bullmq": "^5.12.0",
+    "dotenv": "^16.4.0",
+    "ioredis": "^5.4.0",
+    "minio": "^8.0.0",
+    "nodemailer": "^6.9.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^6.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

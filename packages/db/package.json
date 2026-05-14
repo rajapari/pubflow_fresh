@@ -1,0 +1,19 @@
+{
+  "name": "@pubflow/db",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio"
+  },
+  "exports": { ".": "./generated/client/index.js" },
+  "dependencies": { "@prisma/client": "^5.20.0" },
+  "devDependencies": {
+    "prisma": "^5.20.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

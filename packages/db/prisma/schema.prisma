@@ -1,0 +1,433 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Plan {
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  EDITOR_IN_CHIEF
+  SECTION_EDITOR
+  COPY_EDITOR
+  ARTWORK_EDITOR
+  TYPESETTER
+  PEER_REVIEWER
+  AUTHOR
+  READER
+}
+
+enum PublicationType {
+  JOURNAL
+  BOOK
+  BOOK_SERIES
+  PROCEEDINGS
+}
+
+enum PublicationStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  DESK_REVIEW
+  PEER_REVIEW
+  REVISION_REQUIRED
+  REVISED
+  ACCEPTED
+  COPY_EDITING
+  ARTWORK_PROCESSING
+  TYPESETTING
+  PROOF_REVIEW
+  APPROVED
+  PUBLISHED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ManuscriptFormat {
+  DOCX
+  LATEX
+  MARKDOWN
+  ODT
+  RTF
+}
+
+enum ReviewStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+  IN_PROGRESS
+  SUBMITTED
+  OVERDUE
+}
+
+enum ReviewRecommendation {
+  ACCEPT
+  MINOR_REVISION
+  MAJOR_REVISION
+  REJECT
+}
+
+enum Decision {
+  ACCEPT
+  MINOR_REVISION
+  MAJOR_REVISION
+  REJECT
+  DESK_REJECT
+}
+
+enum AssetType {
+  FIGURE
+  TABLE
+  SUPPLEMENTARY
+  COVER
+}
+
+enum AssetStatus {
+  PENDING
+  PROCESSING
+  APPROVED
+  REJECTED
+  NEEDS_REVISION
+}
+
+enum ColorMode {
+  RGB
+  CMYK
+  GRAYSCALE
+  LAB
+}
+
+enum OutputFormat {
+  PDF_PRINT
+  PDF_WEB
+  EPUB
+  HTML
+  JATS_XML
+  DOCX
+  BIBTEX
+  JSON_LD
+}
+
+enum LayoutEngine {
+  LATEX
+  SCRIBUS
+  PANDOC
+  WEASYPRINT
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRYING
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+  INCOMPLETE
+}
+
+// ─────────────────────────────────────────────
+// MODELS
+// ─────────────────────────────────────────────
+
+model Tenant {
+  id               String       @id @default(uuid())
+  name             String
+  slug             String       @unique
+  plan             Plan         @default(STARTER)
+  status           TenantStatus @default(ACTIVE)
+  stripeCustomerId String?      @unique
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  users         User[]
+  publications  Publication[]
+  submissions   Submission[]
+  subscriptions Subscription[]
+  settings      TenantSettings?
+
+  @@map("tenants")
+}
+
+model TenantSettings {
+  id                    String  @id @default(uuid())
+  tenantId              String  @unique
+  logoUrl               String?
+  primaryColor          String  @default("#534AB7")
+  defaultCitationStyle  String  @default("apa")
+  enablePeerReview      Boolean @default(true)
+  enableDoiRegistration Boolean @default(false)
+  doiPrefix             String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_settings")
+}
+
+model User {
+  id          String     @id @default(uuid())
+  tenantId    String
+  keycloakId  String     @unique
+  email       String
+  firstName   String?
+  lastName    String?
+  orcid       String?
+  affiliation String?
+  role        UserRole   @default(AUTHOR)
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submissions        Submission[]        @relation("SubmissionAuthor")
+  assignedReviews    Review[]            @relation("ReviewerAssignment")
+  editorialDecisions EditorialDecision[]
+  uploadedAssets     Asset[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([keycloakId])
+  @@map("users")
+}
+
+model Publication {
+  id          String            @id @default(uuid())
+  tenantId    String
+  title       String
+  type        PublicationType   @default(JOURNAL)
+  issn        String?
+  isbn        String?
+  description String?
+  coverUrl    String?
+  status      PublicationStatus @default(ACTIVE)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+  issues      Issue[]
+
+  @@index([tenantId])
+  @@map("publications")
+}
+
+model Issue {
+  id            String    @id @default(uuid())
+  publicationId String
+  volume        Int?
+  number        Int?
+  year          Int
+  title         String?
+  publishedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  publication Publication  @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+
+  @@map("issues")
+}
+
+model Submission {
+  id            String           @id @default(uuid())
+  tenantId      String
+  publicationId String
+  issueId       String?
+  authorId      String
+  title         String
+  abstract      String?
+  keywords      String[]
+  coAuthors     Json             @default("[]")
+  status        SubmissionStatus @default(DRAFT)
+  submittedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId],      references: [id], onDelete: Cascade)
+  publication Publication @relation(fields: [publicationId], references: [id])
+  issue       Issue?      @relation(fields: [issueId],       references: [id])
+  author      User        @relation("SubmissionAuthor", fields: [authorId], references: [id])
+
+  manuscripts  Manuscript[]
+  reviews      Review[]
+  assets       Asset[]
+  outputs      Output[]
+  decisions    EditorialDecision[]
+  workflowLogs WorkflowLog[]
+
+  @@index([tenantId])
+  @@index([authorId])
+  @@index([status])
+  @@map("submissions")
+}
+
+model Manuscript {
+  id            String           @id @default(uuid())
+  submissionId  String
+  format        ManuscriptFormat
+  minioPath     String
+  minioKey      String
+  fileSizeBytes Int
+  version       Int              @default(1)
+  isLatest      Boolean          @default(true)
+  pandocJson    Json?
+  uploadedAt    DateTime         @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@map("manuscripts")
+}
+
+model Review {
+  id                String                @id @default(uuid())
+  submissionId      String
+  reviewerId        String
+  round             Int                   @default(1)
+  status            ReviewStatus          @default(INVITED)
+  recommendation    ReviewRecommendation?
+  comments          String?
+  confidentialNotes String?
+  dueAt             DateTime?
+  submittedAt       DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  reviewer   User       @relation("ReviewerAssignment", fields: [reviewerId], references: [id])
+
+  @@index([submissionId])
+  @@map("reviews")
+}
+
+model EditorialDecision {
+  id           String   @id @default(uuid())
+  submissionId String
+  editorId     String
+  decision     Decision
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  editor     User       @relation(fields: [editorId],     references: [id])
+
+  @@map("editorial_decisions")
+}
+
+model Asset {
+  id                String      @id @default(uuid())
+  submissionId      String
+  uploadedById      String
+  filename          String
+  assetType         AssetType
+  minioKey          String
+  minioKeyProcessed String?
+  mimeType          String
+  fileSizeBytes     Int
+  dpi               Int?
+  width             Int?
+  height            Int?
+  colorMode         ColorMode?
+  iccProfile        String?
+  figureLabel       String?
+  altText           String?
+  caption           String?
+  status            AssetStatus @default(PENDING)
+  metadata          Json        @default("{}")
+  uploadedAt        DateTime    @default(now())
+  processedAt       DateTime?
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  uploadedBy User       @relation(fields: [uploadedById], references: [id])
+
+  @@index([submissionId])
+  @@map("assets")
+}
+
+model Output {
+  id            String       @id @default(uuid())
+  submissionId  String
+  format        OutputFormat
+  engine        LayoutEngine
+  minioKey      String
+  fileSizeBytes Int?
+  version       Int          @default(1)
+  jobId         String?
+  status        JobStatus    @default(QUEUED)
+  errorMessage  String?
+  generatedAt   DateTime?
+  createdAt     DateTime     @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@map("outputs")
+}
+
+model WorkflowLog {
+  id           String            @id @default(uuid())
+  submissionId String
+  fromStatus   SubmissionStatus?
+  toStatus     SubmissionStatus
+  performedBy  String?
+  note         String?
+  metadata     Json              @default("{}")
+  createdAt    DateTime          @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@map("workflow_logs")
+}
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  tenantId             String
+  stripeSubscriptionId String             @unique
+  stripePriceId        String
+  plan                 Plan
+  status               SubscriptionStatus
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("subscriptions")
+}

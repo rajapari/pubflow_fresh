@@ -1,0 +1,94 @@
+import fp from 'fastify-plugin'
+import { Client as MinioClient } from 'minio'
+import type { FastifyInstance } from 'fastify'
+import { createHash } from 'crypto'
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    minio: MinioStorage
+  }
+}
+
+export class MinioStorage {
+  private client: MinioClient
+  private bucket: string
+
+  constructor() {
+    const endpoint  = process.env.MINIO_ENDPOINT ?? 'localhost'
+    const port      = Number(process.env.MINIO_PORT ?? 9000)
+    const accessKey = process.env.MINIO_ACCESS_KEY ?? ''
+    const secretKey = process.env.MINIO_SECRET_KEY ?? ''
+    const useSSL    = process.env.MINIO_USE_SSL === 'true'
+
+    if (!accessKey || !secretKey) {
+      throw new Error(
+        'MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be set in .env file.\n' +
+        `Current values: accessKey="${accessKey}", secretKey="${secretKey ? '***' : '(empty)'}"`
+      )
+    }
+
+    this.client = new MinioClient({ endPoint: endpoint, port, useSSL, accessKey, secretKey })
+    this.bucket = process.env.MINIO_BUCKET ?? 'pubflow-files'
+
+    console.info(`MinIO config: ${endpoint}:${port} bucket="${this.bucket}" user="${accessKey}"`)
+  }
+
+  async ensureBucket(): Promise<void> {
+    try {
+      const exists = await this.client.bucketExists(this.bucket)
+      if (!exists) {
+        await this.client.makeBucket(this.bucket, 'us-east-1')
+        console.info(`✅ MinIO: bucket '${this.bucket}' created`)
+      } else {
+        console.info(`✅ MinIO: bucket '${this.bucket}' ready`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        `MinIO connection failed: ${msg}\n` +
+        `Check that MinIO is running: docker ps | grep minio\n` +
+        `And that credentials match docker-compose.yml`
+      )
+    }
+  }
+
+  async upload(key: string, buffer: Buffer, mimeType: string): Promise<string> {
+    await this.client.putObject(this.bucket, key, buffer, buffer.length, {
+      'Content-Type': mimeType,
+    })
+    return key
+  }
+
+  async download(key: string): Promise<Buffer> {
+    const stream = await this.client.getObject(this.bucket, key)
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    }
+    return Buffer.concat(chunks)
+  }
+
+  async getPresignedUrl(key: string, expiry = 900): Promise<string> {
+    return this.client.presignedGetObject(this.bucket, key, expiry)
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.removeObject(this.bucket, key)
+  }
+
+  static buildKey(tenantId: string, submissionId: string, filename: string): string {
+    const ext  = filename.split('.').pop() ?? 'bin'
+    const hash = createHash('sha256')
+      .update(`${tenantId}:${submissionId}:${filename}:${Date.now()}`)
+      .digest('hex')
+      .slice(0, 16)
+    return `${tenantId}/${submissionId}/${hash}.${ext}`
+  }
+}
+
+export const minioPlugin = fp(async (app: FastifyInstance) => {
+  const storage = new MinioStorage()
+  await storage.ensureBucket()
+  app.decorate('minio', storage)
+  app.log.info('✅ MinIO storage ready')
+})

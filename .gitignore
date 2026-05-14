@@ -1,0 +1,16 @@
+node_modules
+.pnpm-store
+.next
+dist
+build
+.turbo
+.env
+.env.local
+.env.*.local
+packages/db/generated
+*.log
+.DS_Store
+Thumbs.db
+.vscode
+coverage
+infra/docker/.volumes
