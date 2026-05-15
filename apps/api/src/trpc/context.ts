@@ -4,13 +4,27 @@ import type { FastifyInstance } from 'fastify'
 import type { PrismaClient } from '@pubflow/db'
 import { prisma } from '../lib/prisma.js'
 import type { AuthUser } from '@pubflow/types'
+import type { MinioStorage } from '../plugins/minio.js'
+import type { Redis } from 'redis'
+import type { Queue } from 'bullmq'
+
+// Augment FastifyInstance to include plugin types
+declare global {
+  namespace FastifyInstance {
+    interface FastifyInstance {
+      minio: MinioStorage
+      queues: Record<string, Queue>
+      redis: Redis
+    }
+  }
+}
 
 export interface Context {
   user: AuthUser | null
   prisma: PrismaClient
-  minio: FastifyInstance['minio']
-  queues: FastifyInstance['queues']
-  redis: FastifyInstance['redis']
+  minio: MinioStorage
+  queues: Record<string, Queue>
+  redis: any
 }
 
 export async function createContext(

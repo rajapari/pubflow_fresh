@@ -275,14 +275,21 @@ export const submissionRouter: ReturnType<typeof router> = router({
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found or not in DRAFT status' })
 
+      const updateData: Record<string, unknown> = {
+        title: input.title ?? sub.title,
+        abstract: input.abstract ?? sub.abstract,
+        keywords: input.keywords ?? sub.keywords,
+      }
+      
+      if (input.coAuthors !== undefined) {
+        updateData.coAuthors = input.coAuthors
+      } else {
+        updateData.coAuthors = sub.coAuthors
+      }
+
       return prisma.submission.update({
         where: { id: input.id },
-        data: {
-          title: input.title ?? sub.title,
-          abstract: input.abstract ?? sub.abstract,
-          keywords: input.keywords ?? sub.keywords,
-          coAuthors: input.coAuthors ?? sub.coAuthors,
-        },
+        data: updateData,
       })
     }),
 
@@ -333,7 +340,7 @@ export const submissionRouter: ReturnType<typeof router> = router({
       // Get the latest manuscript
       const manuscript = await prisma.manuscript.findFirst({
         where: { submissionId: input.submissionId, isLatest: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { version: 'desc' },
       })
       if (!manuscript) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'No manuscript uploaded yet' })
