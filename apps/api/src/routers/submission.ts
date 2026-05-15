@@ -6,6 +6,7 @@ import { CreateSubmissionSchema, EditorialDecisionSchema,
          SubmissionStatusSchema, SubmissionStatus, isValidTransition } from '@pubflow/types'
 import { MinioStorage } from '../plugins/minio.js'
 import { QUEUES } from '@pubflow/types'
+import { createHmac } from 'crypto'
 
 type ManuscriptFormat = 'DOCX' | 'LATEX' | 'MARKDOWN' | 'ODT' | 'RTF'
 
@@ -199,5 +200,209 @@ export const submissionRouter: ReturnType<typeof router> = router({
       })
 
       return { manuscriptId: ms.id, uploadUrl, key }
+    }),
+
+  confirmUpload: protectedProcedure
+    .input(z.object({
+      submissionId: z.string().uuid(),
+      manuscriptId: z.string().uuid(),
+      minioKey: z.string(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma, minio, queues } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
+
+      // Verify manuscript exists and belongs to this submission
+      const ms = await prisma.manuscript.findFirst({
+        where: { id: input.manuscriptId, submissionId: input.submissionId },
+      })
+      if (!ms) throw new TRPCError({ code: 'NOT_FOUND', message: 'Manuscript not found' })
+
+      // Verify file exists in MinIO
+      try {
+        const stat = await minio.client.statObject(minio.bucket, input.minioKey)
+        if (!stat) throw new Error('File not found in MinIO')
+      } catch (err) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'File upload verification failed' })
+      }
+
+      // Create an Output record to track normalization result
+      const output = await prisma.output.create({
+        data: {
+          submissionId: input.submissionId,
+          format: 'DOCX',
+          engine: 'PANDOC',
+          minioKey: '',
+          status: 'QUEUED',
+        },
+      })
+
+      // Queue Pandoc normalization job (processor expects a valid outputId)
+      await queues[QUEUES.PANDOC].add('normalize-manuscript', {
+        type: 'PANDOC',
+        submissionId: input.submissionId,
+        outputId: output.id,
+        inputMinioKey: input.minioKey,
+        inputFormat: (ms.format as string).toLowerCase(),
+        outputFormat: 'docx', // Normalize to DOCX
+        options: { citationStyle: 'apa' },
+      })
+
+      return { success: true, manuscriptId: input.manuscriptId, outputId: output.id }
+    }),
+
+  updateDraft: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+    }).merge(z.object({
+      title: z.string().min(10).max(500).optional(),
+      abstract: z.string().min(50).max(5000).optional(),
+      keywords: z.array(z.string().min(2).max(50)).min(1).max(10).optional(),
+      coAuthors: z.array(z.object({
+        name: z.string(),
+        email: z.string().email(),
+        affiliation: z.string().optional(),
+        orcid: z.string().optional(),
+      })).optional(),
+    })))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.id, tenantId: user.tenantId, authorId: user.id, status: 'DRAFT' },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found or not in DRAFT status' })
+
+      return prisma.submission.update({
+        where: { id: input.id },
+        data: {
+          title: input.title ?? sub.title,
+          abstract: input.abstract ?? sub.abstract,
+          keywords: input.keywords ?? sub.keywords,
+          coAuthors: input.coAuthors ?? sub.coAuthors,
+        },
+      })
+    }),
+
+  deleteDraft: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.id, tenantId: user.tenantId, authorId: user.id, status: 'DRAFT' },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found or not in DRAFT status' })
+
+      await prisma.submission.delete({ where: { id: input.id } })
+      return { success: true }
+    }),
+
+  getWorkflowHistory: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.id, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (user.role === 'AUTHOR' && sub.authorId !== user.id) throw new TRPCError({ code: 'FORBIDDEN' })
+
+      return prisma.workflowLog.findMany({
+        where: { submissionId: input.id },
+        include: { submission: { select: { title: true } } },
+        orderBy: { createdAt: 'asc' },
+      })
+    }),
+
+  getManuscriptEditorUrl: protectedProcedure
+    .input(z.object({ submissionId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { user, prisma, minio } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
+
+      // Author can only edit their own DRAFT submissions
+      if (user.role === 'AUTHOR' && (sub.authorId !== user.id || sub.status !== 'DRAFT')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot edit this submission' })
+      }
+
+      // Get the latest manuscript
+      const manuscript = await prisma.manuscript.findFirst({
+        where: { submissionId: input.submissionId, isLatest: true },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (!manuscript) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'No manuscript uploaded yet' })
+      }
+
+      // Get presigned URL for the manuscript file
+      const presignedUrl = await minio.client.presignedGetObject(minio.bucket, manuscript.minioKey, 900)
+
+      // Generate OnlyOffice JWT token
+      const jwtSecret = process.env.ONLYOFFICE_JWT_SECRET || 'default-secret'
+      const payload = {
+        document: {
+          fileType: 'docx',
+          key: input.submissionId,
+          title: sub.title || 'Manuscript',
+          url: presignedUrl,
+        },
+        editorConfig: {
+          callbackUrl: `${process.env.API_URL || 'http://localhost:3001'}/wopi/callback/${input.submissionId}`,
+          user: {
+            id: user.id,
+            name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+            email: user.email,
+          },
+          customization: {
+            autosave: true,
+            forcesave: false,
+            commentAuthorOnly: false,
+          },
+        },
+        permissions: {
+          comment: true,
+          download: true,
+          edit: sub.status === 'DRAFT',
+          print: true,
+          review: false,
+        },
+      }
+
+      const token = createHmac('sha256', jwtSecret)
+        .update(JSON.stringify(payload))
+        .digest('hex')
+
+      return {
+        onlyofficeUrl: process.env.ONLYOFFICE_URL || 'http://localhost:8081',
+        config: payload,
+        token,
+      }
+    }),
+
+  getManuscriptVersions: protectedProcedure
+    .input(z.object({ submissionId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      // Authors can only see their own manuscript versions
+      if (user.role === 'AUTHOR' && sub.authorId !== user.id) {
+        throw new TRPCError({ code: 'FORBIDDEN' })
+      }
+
+      const manuscripts = await prisma.manuscript.findMany({
+        where: { submissionId: input.submissionId },
+        orderBy: { version: 'desc' },
+      })
+
+      return manuscripts
     }),
 })

@@ -10,8 +10,8 @@ declare module 'fastify' {
 }
 
 export class MinioStorage {
-  private client: MinioClient
-  private bucket: string
+  client: MinioClient
+  bucket: string
 
   constructor() {
     const endpoint  = process.env.MINIO_ENDPOINT ?? 'localhost'
@@ -69,11 +69,27 @@ export class MinioStorage {
   }
 
   async getPresignedUrl(key: string, expiry = 900): Promise<string> {
-    return this.client.presignedGetObject(this.bucket, key, expiry)
+    // Default to a PUT presigned URL for uploads (used by submission upload flow).
+    // Use method override when needed in future.
+    return this.client.presignedPutObject(this.bucket, key, expiry)
+  }
+
+  async statObject(key: string) {
+    return this.client.statObject(this.bucket, key)
   }
 
   async delete(key: string): Promise<void> {
     await this.client.removeObject(this.bucket, key)
+  }
+
+  async getFileStream(key: string): Promise<NodeJS.ReadableStream> {
+    return this.client.getObject(this.bucket, key)
+  }
+
+  async putObject(key: string, buffer: Buffer, mimeType = 'application/octet-stream'): Promise<void> {
+    await this.client.putObject(this.bucket, key, buffer, buffer.length, {
+      'Content-Type': mimeType,
+    })
   }
 
   static buildKey(tenantId: string, submissionId: string, filename: string): string {

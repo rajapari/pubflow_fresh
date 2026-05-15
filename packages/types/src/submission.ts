@@ -48,3 +48,24 @@ export const EditorialDecisionSchema = z.object({
   notes: z.string().optional(),
 })
 export type EditorialDecision = z.infer<typeof EditorialDecisionSchema>
+
+export const UpdateSubmissionSchema = z.object({
+  title: z.string().min(10).max(500).optional(),
+  abstract: z.string().min(50).max(5000).optional(),
+  keywords: z.array(z.string().min(2).max(50)).min(1).max(10).optional(),
+  coAuthors: z.array(z.object({
+    name: z.string(),
+    email: z.string().email(),
+    affiliation: z.string().optional(),
+    orcid: z.string().optional(),
+  })).optional(),
+})
+export type UpdateSubmission = z.infer<typeof UpdateSubmissionSchema>
+
+export const ManuscriptUploadSchema = z.object({
+  submissionId: z.string().uuid(),
+  filename: z.string().min(1).max(255),
+  mimeType: z.string().regex(/^application\/|^text\//),
+  size: z.number().min(1).max(500 * 1024 * 1024),
+})
+export type ManuscriptUpload = z.infer<typeof ManuscriptUploadSchema>
