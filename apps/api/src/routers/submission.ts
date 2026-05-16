@@ -281,7 +281,7 @@ export const submissionRouter: ReturnType<typeof router> = router({
           title: input.title ?? sub.title,
           abstract: input.abstract ?? sub.abstract,
           keywords: input.keywords ?? sub.keywords,
-          coAuthors: input.coAuthors ?? sub.coAuthors,
+          coAuthors: (input.coAuthors ?? sub.coAuthors) as any,
         },
       })
     }),
@@ -333,7 +333,7 @@ export const submissionRouter: ReturnType<typeof router> = router({
       // Get the latest manuscript
       const manuscript = await prisma.manuscript.findFirst({
         where: { submissionId: input.submissionId, isLatest: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { uploadedAt: 'desc' },
       })
       if (!manuscript) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'No manuscript uploaded yet' })

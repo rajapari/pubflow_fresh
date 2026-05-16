@@ -15,7 +15,7 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * GET /wopi/files/:key
    * CheckFileInfo — Return metadata about the file
    */
-  app.get<{ Params: { key: string } }>('/wopi/files/:key', async (req: FastifyRequest, reply: FastifyReply) => {
+  app.get<{ Params: { key: string } }>('/wopi/files/:key', async (req, reply) => {
     const { key } = req.params
 
     // Parse key: tenantId/submissionId/manuscriptId/filename.ext
@@ -60,7 +60,7 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * GET /wopi/files/:key/contents
    * GetFile — Download file contents
    */
-  app.get<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req: FastifyRequest, reply: FastifyReply) => {
+  app.get<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req, reply) => {
     const { key } = req.params
 
     try {
@@ -92,7 +92,7 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * POST /wopi/files/:key/contents
    * PutFile — Upload modified file contents, create new version
    */
-  app.post<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req: FastifyRequest, reply: FastifyReply) => {
+  app.post<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req, reply) => {
     const { key } = req.params
 
     try {
@@ -111,13 +111,13 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
       const buffer = await req.file()
       if (!buffer) return reply.code(400).send({ error: 'No file provided' })
 
-      const fileBuffer = await buffer.file.buffer()
+      const fileBuffer = await buffer.toBuffer()
       
       // Upload to MinIO with new version
       const newVersion = manuscript.version + 1
       const newKey = key.replace(manuscriptId, `${manuscriptId}-v${newVersion}`)
 
-      await minio.putObject(newKey, fileBuffer)
+      await app.minio.putObject(newKey, fileBuffer)
 
       // Create new manuscript version in DB
       const newManuscript = await prisma.$transaction([
@@ -152,7 +152,7 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * POST /wopi/callback/:submissionId
    * OnlyOffice AutoSave Callback — Called periodically by OnlyOffice
    */
-  app.post<{ Params: { submissionId: string } }>('/wopi/callback/:submissionId', async (req: FastifyRequest, reply: FastifyReply) => {
+  app.post<{ Params: { submissionId: string } }>('/wopi/callback/:submissionId', async (req, reply) => {
     const { submissionId } = req.params
 
     try {
