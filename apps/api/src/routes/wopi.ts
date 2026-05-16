@@ -15,8 +15,8 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * GET /wopi/files/:key
    * CheckFileInfo — Return metadata about the file
    */
-  app.get<{ Params: { key: string } }>('/wopi/files/:key', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { key } = req.params
+  app.get<{ Params: { key: string } }>('/wopi/files/:key', async (req: FastifyRequest<{ Params: { key: string } }>, reply: FastifyReply) => {
+    const { key } = req.params as { key: string }
 
     // Parse key: tenantId/submissionId/manuscriptId/filename.ext
     const parts = key.split('/')
@@ -60,12 +60,12 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * GET /wopi/files/:key/contents
    * GetFile — Download file contents
    */
-  app.get<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { key } = req.params
+  app.get<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req: FastifyRequest<{ Params: { key: string } }>, reply: FastifyReply) => {
+    const { key } = req.params as { key: string }
 
     try {
       const parts = key.split('/')
-      const [tenantId, submissionId, manuscriptId] = parts
+      const [tenantId, submissionId, manuscriptId] = parts as [string, string, string]
 
       const manuscript = await prisma.manuscript.findUnique({
         where: { id: manuscriptId },
@@ -92,12 +92,12 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * POST /wopi/files/:key/contents
    * PutFile — Upload modified file contents, create new version
    */
-  app.post<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { key } = req.params
+  app.post<{ Params: { key: string } }>('/wopi/files/:key/contents', async (req: FastifyRequest<{ Params: { key: string } }>, reply: FastifyReply) => {
+    const { key } = req.params as { key: string }
 
     try {
       const parts = key.split('/')
-      const [tenantId, submissionId, manuscriptId] = parts
+      const [tenantId, submissionId, manuscriptId] = parts as [string, string, string]
 
       const manuscript = await prisma.manuscript.findUnique({
         where: { id: manuscriptId },
@@ -108,15 +108,16 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
       }
 
       // Read request body as buffer
-      const buffer = await req.file()
-      if (!buffer) return reply.code(400).send({ error: 'No file provided' })
+      const file = await req.file()
+      if (!file) return reply.code(400).send({ error: 'No file provided' })
 
-      const fileBuffer = await buffer.file.buffer()
+      const fileBuffer = Buffer.from(await file.toBuffer())
       
       // Upload to MinIO with new version
       const newVersion = manuscript.version + 1
       const newKey = key.replace(manuscriptId, `${manuscriptId}-v${newVersion}`)
 
+      const { minio } = app
       await minio.putObject(newKey, fileBuffer)
 
       // Create new manuscript version in DB
@@ -152,8 +153,8 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
    * POST /wopi/callback/:submissionId
    * OnlyOffice AutoSave Callback — Called periodically by OnlyOffice
    */
-  app.post<{ Params: { submissionId: string } }>('/wopi/callback/:submissionId', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { submissionId } = req.params
+  app.post<{ Params: { submissionId: string } }>('/wopi/callback/:submissionId', async (req: FastifyRequest<{ Params: { submissionId: string } }>, reply: FastifyReply) => {
+    const { submissionId } = req.params as { submissionId: string }
 
     try {
       // OnlyOffice sends a callback when autosave happens
