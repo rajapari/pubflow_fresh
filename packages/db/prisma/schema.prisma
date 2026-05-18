@@ -152,6 +152,15 @@ enum JobStatus {
   RETRYING
 }
 
+enum ProofReviewStatus {
+  OPEN
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  NEEDS_REVISION
+  SUBMITTED
+}
+
 enum SubscriptionStatus {
   ACTIVE
   PAST_DUE
@@ -218,6 +227,8 @@ model User {
   editorialDecisions EditorialDecision[]
   uploadedAssets     Asset[]
 
+  proofReviews       ProofReview[]
+
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([keycloakId])
@@ -283,6 +294,7 @@ model Submission {
 
   manuscripts  Manuscript[]
   reviews      Review[]
+  proofReviews ProofReview[]
   assets       Asset[]
   outputs      Output[]
   decisions    EditorialDecision[]
@@ -347,6 +359,27 @@ model EditorialDecision {
   @@map("editorial_decisions")
 }
 
+model ProofReview {
+  id           String            @id @default(uuid())
+  submissionId String
+  outputId     String?
+  reviewerId   String
+  round        Int               @default(1)
+  status       ProofReviewStatus @default(OPEN)
+  comments     String?
+  annotations  Json              @default("{}")
+  submittedAt  DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  output     Output?    @relation(fields: [outputId], references: [id])
+  reviewer   User       @relation(fields: [reviewerId], references: [id])
+
+  @@index([submissionId])
+  @@map("proof_reviews")
+}
+
 model Asset {
   id                String      @id @default(uuid())
   submissionId      String
@@ -392,6 +425,8 @@ model Output {
   createdAt     DateTime     @default(now())
 
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  proofReviews ProofReview[]
 
   @@index([submissionId])
   @@map("outputs")
