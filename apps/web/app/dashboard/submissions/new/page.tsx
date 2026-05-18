@@ -34,6 +34,7 @@ export default function NewSubmissionPage() {
     control,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(CreateSubmissionSchema),
@@ -57,11 +58,13 @@ export default function NewSubmissionPage() {
 
   const handleAddKeyword = () => {
     if (keywordInput.trim() && keywords.length < 10) {
-      // This is a bit tricky with react-hook-form, we need to use setValue
-      const currentKeywords = watch('keywords')
-      const { register: _ } = useForm() // Get setValue from a new instance for simplicity
-      setStep(1) // Trigger re-render, the keyword will be added via the form state
+      setValue('keywords', [...keywords, keywordInput.trim()])
+      setKeywordInput('')
     }
+  }
+
+  const handleRemoveKeyword = (index: number) => {
+    setValue('keywords', keywords.filter((_, i) => i !== index))
   }
 
   const onSubmit = async (data: FormData) => {
@@ -131,7 +134,7 @@ export default function NewSubmissionPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
-                      // Handle keyword addition
+                      handleAddKeyword()
                     }
                   }}
                 />
@@ -143,9 +146,7 @@ export default function NewSubmissionPage() {
                     {kw}
                     <button
                       type="button"
-                      onClick={() => {
-                        // Remove keyword
-                      }}
+                      onClick={() => handleRemoveKeyword(idx)}
                       className="text-blue-900 hover:text-blue-700"
                     >
                       ×

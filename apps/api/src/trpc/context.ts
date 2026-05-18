@@ -3,28 +3,19 @@ import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
 import type { FastifyInstance } from 'fastify'
 import type { PrismaClient } from '@pubflow/db'
 import { prisma } from '../lib/prisma.js'
-import type { AuthUser } from '@pubflow/types'
+import type { AuthUser, QueueName } from '@pubflow/types'
 import type { MinioStorage } from '../plugins/minio.js'
-import type { Redis } from 'redis'
 import type { Queue } from 'bullmq'
-
-// Augment FastifyInstance to include plugin types
-declare global {
-  namespace FastifyInstance {
-    interface FastifyInstance {
-      minio: MinioStorage
-      queues: Record<string, Queue>
-      redis: Redis
-    }
-  }
-}
+import type { Redis } from 'ioredis'
+// Import auth plugin to ensure module augmentations are available
+import '../plugins/auth.js'
 
 export interface Context {
   user: AuthUser | null
   prisma: PrismaClient
   minio: MinioStorage
-  queues: Record<string, Queue>
-  redis: any
+  queues: Record<QueueName, Queue>
+  redis: Redis
 }
 
 export async function createContext(
@@ -36,5 +27,6 @@ export async function createContext(
     await app.optionalAuth(req)
     user = (req as unknown as { user: AuthUser }).user ?? null
   } catch { /* unauthenticated */ }
-  return { user, prisma, minio: app.minio, queues: app.queues, redis: app.redis }
+  const anyApp = app as any
+  return { user, prisma, minio: anyApp.minio, queues: anyApp.queues, redis: anyApp.redis }
 }

@@ -19,6 +19,11 @@ export async function imageProcessor(job: Job) {
     const processedKey = d.inputMinioKey.replace(/(\.[^.]+)$/, '_processed$1')
     await uploadToMinio(processedKey, Buffer.from(result.processed, 'base64'), result.mimeType)
     const metadata = JSON.parse(JSON.stringify(result.metadata)) as Prisma.InputJsonValue
+    const colorModeStr = (result.metadata['colorMode'] as string | undefined)
+    const colorModeEnum = (colorModeStr && ['RGB', 'CMYK', 'GRAYSCALE', 'LAB'].includes(colorModeStr) 
+      ? colorModeStr 
+      : null) as 'RGB' | 'CMYK' | 'GRAYSCALE' | 'LAB' | null | undefined
+    
     await prisma.asset.update({
       where: { id: d.assetId },
       data: {
@@ -27,7 +32,7 @@ export async function imageProcessor(job: Job) {
         dpi:      result.metadata['dpi'] as number | undefined,
         width:    result.metadata['width'] as number | undefined,
         height:   result.metadata['height'] as number | undefined,
-        colorMode: (result.metadata['colorMode'] as string | undefined) ?? undefined,
+        colorMode: colorModeEnum,
         metadata,
         processedAt: new Date(),
       },

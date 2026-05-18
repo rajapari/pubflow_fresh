@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 declare global {
@@ -49,6 +49,23 @@ export function OnlyOfficeEditor({ onlyofficeUrl, config, token }: OnlyOfficeEdi
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const initEditor = useCallback(() => {
+    if (!containerRef.current || !window.DocsAPI) return
+
+    try {
+      const editorConfig = {
+        ...config,
+        token,
+      }
+
+      new window.DocsAPI.DocEditor('onlyoffice-container', editorConfig)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to initialize editor'
+      setError(message)
+      toast.error(message)
+    }
+  }, [config, token])
+
   useEffect(() => {
     // Load OnlyOffice API script
     const scriptId = 'onlyoffice-api'
@@ -71,24 +88,7 @@ export function OnlyOfficeEditor({ onlyofficeUrl, config, token }: OnlyOfficeEdi
       setIsLoading(false)
       initEditor()
     }
-  }, [onlyofficeUrl])
-
-  const initEditor = () => {
-    if (!containerRef.current || !window.DocsAPI) return
-
-    try {
-      const editorConfig = {
-        ...config,
-        token,
-      }
-
-      new window.DocsAPI.DocEditor('onlyoffice-container', editorConfig)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to initialize editor'
-      setError(message)
-      toast.error(message)
-    }
-  }
+  }, [onlyofficeUrl, initEditor])
 
   if (error) {
     return (

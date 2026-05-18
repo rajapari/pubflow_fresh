@@ -57,7 +57,7 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
 
       req.user = dbUser as AuthUser
     } catch {
-      throw app.httpErrors.unauthorized('Unauthorized')
+      throw (app as any).httpErrors.unauthorized('Unauthorized')
     }
   })
 

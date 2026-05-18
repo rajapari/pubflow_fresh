@@ -1,25 +1,8 @@
 'use client'
 
-import React from 'react'
-import { useRouter } from 'next/navigation'
-import { trpc } from '@/lib/trpc-client'
-import { Button } from '@/components/ui/Form'
-import { StatusBadge } from '@/components/ui/StatusBadge'
-import { toast } from 'sonner'
-
-interface AssignReviewerModalProps {
-  submissionId: string | null
-  isOpen: boolean
-  onClose: () => void
-  onAssign: (reviewerId: string) => Promise<void>
-  isLoading: boolean
+export default function EditorialPage() {
+  return <div className="p-8">Editorial page - placeholder</div>
 }
-
-function AssignReviewerModal({ submissionId, isOpen, onClose, onAssign, isLoading }: AssignReviewerModalProps) {
-  const [selectedReviewerId, setSelectedReviewerId] = React.useState('')
-  const reviewers = trpc.user.list.useQuery({ role: 'PEER_REVIEWER' })
-
-  if (!isOpen || !submissionId) return null
 
   const handleAssign = async () => {
     if (!selectedReviewerId) {
@@ -44,7 +27,7 @@ function AssignReviewerModal({ submissionId, isOpen, onClose, onAssign, isLoadin
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Choose a reviewer...</option>
-              {reviewers.data?.map((r: any) => (
+              {(reviewers.data || [])?.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.firstName} {r.lastName} ({r.email})
                 </option>
