@@ -18,26 +18,65 @@ export async function imageProcessor(job: Job) {
     const result = await res.json() as { processed: string; metadata: Record<string,unknown>; errors: string[]; mimeType: string }
     const processedKey = d.inputMinioKey.replace(/(\.[^.]+)$/, '_processed$1')
     await uploadToMinio(processedKey, Buffer.from(result.processed, 'base64'), result.mimeType)
+    // Normalize and validate metadata
+    const rawMetadata = result.metadata ?? {}
+    const parseNumber = (v: unknown) => {
+      if (typeof v === 'number') return Math.round(v)
+      if (typeof v === 'string') {
+        const n = parseFloat(v)
+        return Number.isNaN(n) ? undefined : Math.round(n)
+      }
+      return undefined
+    }
+
+    const dpi = parseNumber(rawMetadata['dpi'])
+    const width = parseNumber(rawMetadata['width'])
+    const height = parseNumber(rawMetadata['height'])
+    const colorModeRaw = typeof rawMetadata['colorMode'] === 'string' ? String(rawMetadata['colorMode']).toUpperCase() : undefined
+    const validColorModes = ['RGB','CMYK','GRAYSCALE','LAB']
+    const colorMode = colorModeRaw && validColorModes.includes(colorModeRaw) ? colorModeRaw as 'RGB'|'CMYK'|'GRAYSCALE'|'LAB' : null
+
+    // Validation checks
+    const validationIssues: string[] = [...(result.errors ?? [])]
+    const needsDpiFix = d.tasks.includes('VALIDATE_DPI') && (dpi === undefined || dpi < d.targetDpi)
+    if (needsDpiFix) validationIssues.push(`DPI ${dpi ?? 'unknown'} < ${d.targetDpi}`)
+
+    const needsColorFix = d.tasks.includes('VALIDATE_COLORMODE') && !!d.targetColorMode && colorMode !== d.targetColorMode
+    if (needsColorFix) validationIssues.push(`ColorMode ${colorMode ?? 'unknown'} != ${d.targetColorMode}`)
+
+    const finalStatus = validationIssues.length ? 'NEEDS_REVISION' : 'APPROVED'
+
     const metadata = JSON.parse(JSON.stringify(result.metadata)) as Prisma.InputJsonValue
-    const colorModeStr = (result.metadata['colorMode'] as string | undefined)
-    const colorModeEnum = (colorModeStr && ['RGB', 'CMYK', 'GRAYSCALE', 'LAB'].includes(colorModeStr) 
-      ? colorModeStr 
-      : null) as 'RGB' | 'CMYK' | 'GRAYSCALE' | 'LAB' | null | undefined
-    
+    const augmentedMetadata = {
+      ...((metadata && typeof metadata === 'object') ? metadata : {}),
+      validation: {
+        needsDpiFix,
+        needsColorFix,
+        dpi,
+        width,
+        height,
+        colorMode,
+        targetDpi: d.targetDpi,
+        targetColorMode: d.targetColorMode,
+        issues: validationIssues,
+      },
+    } as Prisma.InputJsonValue
+
     await prisma.asset.update({
       where: { id: d.assetId },
       data: {
-        status: result.errors.length ? 'NEEDS_REVISION' : 'APPROVED',
+        status: finalStatus,
         minioKeyProcessed: processedKey,
-        dpi:      result.metadata['dpi'] as number | undefined,
-        width:    result.metadata['width'] as number | undefined,
-        height:   result.metadata['height'] as number | undefined,
-        colorMode: colorModeEnum,
-        metadata,
+        dpi,
+        width,
+        height,
+        colorMode,
+        metadata: augmentedMetadata,
         processedAt: new Date(),
       },
     })
-    return { processedKey, errors: result.errors }
+
+    return { processedKey, issues: validationIssues }
   } catch (err) {
     await prisma.asset.update({ where: { id: d.assetId }, data: { status: 'REJECTED', metadata: { error: String(err) } } })
     throw err
