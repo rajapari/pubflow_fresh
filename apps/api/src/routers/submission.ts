@@ -10,7 +10,7 @@ import { createHmac } from 'crypto'
 
 type ManuscriptFormat = 'DOCX' | 'LATEX' | 'MARKDOWN' | 'ODT' | 'RTF'
 
-export const submissionRouter: ReturnType<typeof router> = router({
+export const submissionRouter = router({
 
   list: protectedProcedure
     .input(z.object({

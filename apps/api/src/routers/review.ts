@@ -5,7 +5,7 @@ import { router, protectedProcedure, editorProcedure } from '../trpc/procedures.
 import { AssignReviewerSchema, SubmitReviewSchema, AcceptReviewSchema, DeclineReviewSchema } from '@pubflow/types'
 import { QUEUES } from '@pubflow/types'
 
-export const reviewRouter: ReturnType<typeof router> = router({
+export const reviewRouter = router({
 
   list: protectedProcedure
     .input(z.object({

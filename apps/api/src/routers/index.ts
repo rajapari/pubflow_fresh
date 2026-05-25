@@ -8,9 +8,7 @@ import { publicationRouter } from './publication.js'
 import { tenantRouter }      from './tenant.js'
 import { userRouter }        from './user.js'
 
-type AppRouterType = ReturnType<typeof router>
-
-export const appRouter: AppRouterType = router({
+export const appRouter = router({
   submission:  submissionRouter,
   review:      reviewRouter,
   proofReview: proofReviewRouter,
