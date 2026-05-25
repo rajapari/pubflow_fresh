@@ -16,7 +16,7 @@ export default function ProofReviewPage() {
   const outputsQuery = trpc.proofReview.listOutputs.useQuery({ submissionId })
   const submitReviewMutation = trpc.proofReview.submit.useMutation()
 
-  const selectedReview = reviewsQuery.data?.find(r => r.id === selectedReviewId)
+  const selectedReview = (reviewsQuery.data as any)?.find((r: any) => r.id === selectedReviewId)
 
   const handleSubmitReview = async (status: 'APPROVED' | 'REJECTED' | 'NEEDS_REVISION', comments: string) => {
     if (!selectedReviewId) return
@@ -60,7 +60,7 @@ export default function ProofReviewPage() {
               <Loader className="h-6 w-6 animate-spin text-gray-400" />
             </div>
           ) : reviewsQuery.data && reviewsQuery.data.length > 0 ? (
-            reviewsQuery.data.map(review => (
+            (reviewsQuery.data as any[]).map((review: any) => (
               <button
                 key={review.id}
                 onClick={() => setSelectedReviewId(review.id)}
