@@ -67,14 +67,14 @@ export default function SubmissionsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {data.submissions.map((sub) => (
+                {(data?.submissions || []).map((sub: any) => (
                   <tr key={sub.id} className="hover:bg-gray-50 cursor-pointer transition-colors"
                     onClick={() => window.location.href = `/dashboard/submissions/${sub.id}`}>
                     <td className="px-5 py-3.5 font-medium text-gray-900 max-w-xs">
                       <p className="truncate">{sub.title}</p>
                     </td>
-                    <td className="px-5 py-3.5 text-gray-500">{sub.publication.title}</td>
-                    <td className="px-5 py-3.5 text-gray-500">{sub.author.firstName} {sub.author.lastName}</td>
+                    <td className="px-5 py-3.5 text-gray-500">{sub.publication?.title}</td>
+                    <td className="px-5 py-3.5 text-gray-500">{sub.author?.firstName} {sub.author?.lastName}</td>
                     <td className="px-5 py-3.5"><StatusBadge status={sub.status} /></td>
                     <td className="px-5 py-3.5 text-xs text-gray-400">{formatDate(sub.createdAt)}</td>
                   </tr>

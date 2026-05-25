@@ -1,10 +1,10 @@
 import { formatDistanceToNow } from 'date-fns'
 
 interface WorkflowStep {
-  fromStatus?: string
+  fromStatus?: string | null
   toStatus: string
-  performedBy?: string
-  note?: string
+  performedBy?: string | null
+  note?: string | null
   createdAt: string
 }
 

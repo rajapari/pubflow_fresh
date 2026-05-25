@@ -148,14 +148,6 @@ export default function ProofReviewPage() {
                       <p className="text-sm font-medium text-gray-600">Status</p>
                       <StatusBadge status={selectedReview.output.status} />
                     </div>
-                    {selectedReview.output.fileSizeBytes && (
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Size</p>
-                        <p className="text-sm text-gray-900">
-                          {(selectedReview.output.fileSizeBytes / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                      </div>
-                    )}
                     <button className="w-full px-4 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium text-sm transition-colors flex items-center justify-center gap-2 mt-4">
                       <Eye className="h-4 w-4" />
                       View PDF in Viewer

@@ -13,7 +13,7 @@ interface ReviewWithSubmission {
   status: string
   recommendation?: string
   comments?: string
-  createdAt: Date
+  createdAt: string
   submission?: {
     title: string
     status: string
