@@ -74,7 +74,7 @@ export default function SubmissionDetailPage() {
           {isDraft && isAuthor && (
             <div className="mt-4 flex gap-2">
               <Button onClick={() => router.push(`/dashboard/submissions/${sub.id}/edit`)}>Edit manuscript</Button>
-              <Button variant="secondary" onClick={handleSubmit} loading={submitMutation.isLoading}>Submit</Button>
+              <Button variant="secondary" onClick={handleSubmit} loading={submitMutation.isPending}>Submit</Button>
             </div>
           )}
         </div>

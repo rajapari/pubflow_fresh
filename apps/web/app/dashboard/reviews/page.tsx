@@ -53,10 +53,11 @@ export default function ReviewsPage() {
     }
   }
 
-  const filteredReviews = reviews.data?.filter((r: ReviewWithSubmission) => {
+  const filteredReviews = (reviews.data?.reviews || reviews.data || []) as ReviewWithSubmission[]
+  const filtered = filteredReviews.filter((r: any) => {
     if (filter === 'ALL') return true
     return r.status === filter
-  }) || []
+  })
 
   if (reviews.isLoading) return <div className="p-8">Loading...</div>
 
@@ -75,12 +76,12 @@ export default function ReviewsPage() {
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
-            {status} {filteredReviews.filter((r) => r.status === status).length > 0 && `(${filteredReviews.filter((r) => r.status === status).length})`}
+            {status} {filtered.filter((r: any) => r.status === status).length > 0 && `(${filtered.filter((r: any) => r.status === status).length})`}
           </button>
         ))}
       </div>
 
-      {filteredReviews.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="bg-gray-50 rounded-lg p-8 text-center">
           <p className="text-gray-600">No reviews found for this filter</p>
         </div>
@@ -97,7 +98,7 @@ export default function ReviewsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredReviews.map((review: ReviewWithSubmission) => (
+              {filtered.map((review: any) => (
                 <tr key={review.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <button

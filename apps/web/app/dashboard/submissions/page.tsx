@@ -35,7 +35,7 @@ export default function SubmissionsPage() {
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {FILTERS.map((f) => (
           <button key={f}
-            onClick={() => { setStatus(f === 'All' ? undefined : f); setPage(1) }}
+            onClick={() => { setStatus(f === 'All' ? undefined : (f as any)); setPage(1) }}
             className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               (f === 'All' && !status) || f === status
                 ? 'bg-brand-500 text-white'
