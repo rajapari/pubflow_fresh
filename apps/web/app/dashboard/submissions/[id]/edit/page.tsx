@@ -52,18 +52,20 @@ export default function EditSubmissionPage() {
   })
 
   // Initialize form with submission data
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(() => {
     if (submission.data) {
+      const data = submission.data as any
       reset({
-        title: submission.data.title,
-        abstract: submission.data.abstract ?? '',
-        keywords: submission.data.keywords ?? [],
-        coAuthors: (submission.data.coAuthors as any) ?? [],
+        title: data.title,
+        abstract: data.abstract ?? '',
+        keywords: data.keywords ?? [],
+        coAuthors: data.coAuthors ?? [],
       })
     }
-  }, [submission.data, reset])
+  }, [submissionId])
 
-  const onSubmit = async (data: FormData) => {
+  const onSubmit = async (data: any) => {
     try {
       await updateMutation.mutateAsync({ id: submissionId, ...data })
       toast.success('Submission updated!')

@@ -23,10 +23,10 @@ export default function SubmissionDetailPage() {
   const router = useRouter()
   const submissionId = params.id as string
 
-  const submissionQ = trpc.submission.byId.useQuery({ id: submissionId })
-  const versionsQ = trpc.submission.getManuscriptVersions.useQuery({ submissionId }, { enabled: !!submissionId })
-  const reviewsQ = trpc.review.listForSubmission.useQuery({ submissionId }, { enabled: !!submissionId })
-  const workflowQ = trpc.submission.getWorkflowHistory.useQuery({ id: submissionId }, { enabled: !!submissionId })
+  const submissionQ = trpc.submission.byId.useQuery({ id: submissionId }) as any
+  const versionsQ = trpc.submission.getManuscriptVersions.useQuery({ submissionId }, { enabled: !!submissionId }) as any
+  const reviewsQ = trpc.review.listForSubmission.useQuery({ submissionId }, { enabled: !!submissionId }) as any
+  const workflowQ = trpc.submission.getWorkflowHistory.useQuery({ id: submissionId }, { enabled: !!submissionId }) as any
 
   const submitMutation = trpc.submission.submit.useMutation()
   const [showUpload, setShowUpload] = useState(false)
