@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { httpBatchLink } from '@trpc/client'
 import { createTRPCReact } from '@trpc/react-query'
 import type { AppRouter } from '../lib/trpc-types'
+import { getAuthToken } from '@/lib/auth'
 
 export const trpc = createTRPCReact<AppRouter>()
 
@@ -18,7 +19,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         url: `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/trpc`,
         headers() {
           if (typeof window === 'undefined') return {}
-          const token = localStorage.getItem('pubflow_token')
+          const token = getAuthToken()
           return token ? { Authorization: `Bearer ${token}` } : {}
         },
       })],

@@ -7,6 +7,7 @@ import { Header } from '@/components/Header'
 import { Footer } from '@/components/Footer'
 import { ArrowRight, Mail, Lock, User, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { saveAuthToken } from '@/lib/auth'
 
 export default function SignupPage() {
   const router = useRouter()
@@ -56,8 +57,7 @@ export default function SignupPage() {
     try {
       // Simulate signup
       toast.success('Account created successfully!')
-      // Store demo token
-      localStorage.setItem('pubflow_token', 'demo-token-' + Date.now())
+      saveAuthToken('demo-token-' + Date.now())
       router.push('/dashboard')
     } finally {
       setIsLoading(false)
@@ -66,12 +66,12 @@ export default function SignupPage() {
 
   const handleOAuthSignup = (provider: 'keycloak' | 'google' | 'github') => {
     setIsLoading(true)
-    // In production, this would redirect to Keycloak OAuth endpoint
     const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL || 'http://localhost:8080'
-    const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow'
+    const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM || 'pubflow'
+    const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
     const redirectUri = `${window.location.origin}/auth/callback`
-    
-    const oauthUrl = `${keycloakUrl}/realms/master/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid&kc_action=register`
+
+    const oauthUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid&kc_action=register`
     window.location.href = oauthUrl
   }
 

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import Keycloak from 'keycloak-js'
+import { saveAuthToken, clearAuthToken } from '@/lib/auth'
 
 let kc: Keycloak | null = null
 let kcInitialized = false
@@ -94,13 +95,13 @@ export function useAuth() {
     initPromise
       .then((ok) => {
         if (ok && k.token && k.tokenParsed) {
-          saveToken(k.token)
+          saveAuthToken(k.token)
           setUser(extractUser(k))
           setAuthed(true)
 
           intervalId = setInterval(() => {
             k.updateToken(60)
-              .then((refreshed) => { if (refreshed && k.token) saveToken(k.token) })
+              .then((refreshed) => { if (refreshed && k.token) saveAuthToken(k.token) })
               .catch(() => console.warn('Token refresh failed'))
           }, 30_000)
         }
@@ -112,12 +113,12 @@ export function useAuth() {
   }, [])
 
   const login = useCallback(
-    () => getKC().login({ redirectUri: `${window.location.origin}/dashboard` }),
+    () => getKC().login({ redirectUri: `${window.location.origin}/auth/callback` }),
     []
   )
 
   const logout = useCallback(() => {
-    clearToken()
+    clearAuthToken()
     getKC().logout({ redirectUri: window.location.origin })
   }, [])
 

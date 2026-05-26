@@ -7,6 +7,7 @@ import { Header } from '@/components/Header'
 import { Footer } from '@/components/Footer'
 import { ArrowRight, Mail, Lock, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
+import { saveAuthToken } from '@/lib/auth'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -31,12 +32,12 @@ export default function LoginPage() {
 
   const handleOAuthLogin = (provider: 'keycloak' | 'google' | 'github') => {
     setIsLoading(true)
-    // In production, this would redirect to Keycloak OAuth endpoint
     const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL || 'http://localhost:8080'
-    const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow'
+    const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM || 'pubflow'
+    const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
     const redirectUri = `${window.location.origin}/auth/callback`
-    
-    const oauthUrl = `${keycloakUrl}/realms/master/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid`
+
+    const oauthUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid`
     window.location.href = oauthUrl
   }
 
@@ -47,8 +48,7 @@ export default function LoginPage() {
       // Simulate login for demo
       if (email === 'demo@example.com' && password === 'demo-password') {
         toast.success('Demo login successful!')
-        // Store demo token
-        localStorage.setItem('pubflow_token', 'demo-token-' + Date.now())
+        saveAuthToken('demo-token-' + Date.now())
         router.push('/dashboard')
       } else {
         toast.error('Invalid credentials. Try demo@example.com / demo-password')

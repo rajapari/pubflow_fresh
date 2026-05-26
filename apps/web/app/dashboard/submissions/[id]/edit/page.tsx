@@ -34,6 +34,7 @@ export default function EditSubmissionPage() {
   const editorConfig = trpc.submission.getManuscriptEditorUrl.useQuery({ submissionId })
   const updateMutation = trpc.submission.updateDraft.useMutation()
   const deleteMutation = trpc.submission.deleteDraft.useMutation()
+  const submissionData = submission.data as any
 
   const {
     register,
@@ -51,19 +52,16 @@ export default function EditSubmissionPage() {
     name: 'coAuthors',
   })
 
-  // Initialize form with submission data
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(() => {
-    if (submission.data) {
-      const data = submission.data as any
+    if (submissionData) {
       reset({
-        title: data.title,
-        abstract: data.abstract ?? '',
-        keywords: data.keywords ?? [],
-        coAuthors: data.coAuthors ?? [],
+        title: submissionData.title,
+        abstract: submissionData.abstract ?? '',
+        keywords: submissionData.keywords ?? [],
+        coAuthors: submissionData.coAuthors ?? [],
       })
     }
-  }, [submissionId])
+  }, [submissionId, submissionData, reset])
 
   const onSubmit = async (data: any) => {
     try {
