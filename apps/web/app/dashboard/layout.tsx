@@ -5,9 +5,7 @@ import { Sidebar } from '@/components/layout/Sidebar'
 import { TopBar } from '@/components/layout/TopBar'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { ready, authed, login } = useAuth()
-
-  useEffect(() => { if (ready && !authed) login() }, [ready, authed, login])
+  const { ready, authed } = useAuth()
 
   if (!ready) return (
     <div className="flex h-screen items-center justify-center">

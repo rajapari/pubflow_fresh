@@ -37,7 +37,7 @@ export default function LoginPage() {
     const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
     const redirectUri = `${window.location.origin}/auth/callback`
 
-    const oauthUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid`
+    const oauthUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&response_mode=query&scope=openid`
     window.location.href = oauthUrl
   }
 

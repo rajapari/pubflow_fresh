@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import Keycloak from 'keycloak-js'
-import { saveAuthToken, clearAuthToken } from '@/lib/auth'
+import { saveAuthToken, clearAuthToken, getAuthToken } from '@/lib/auth'
 
 let kc: Keycloak | null = null
 let kcInitialized = false
@@ -67,20 +67,75 @@ function clearToken() {
   try { localStorage.removeItem('pubflow_token') } catch { /* no-op in SSR */ }
 }
 
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.')
+  if (parts.length < 2) return null
+
+  try {
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=')
+    const decoded = decodeURIComponent(escape(atob(padded)))
+    return JSON.parse(decoded)
+  } catch {
+    return null
+  }
+}
+
+function extractUserFromClaims(claims: Record<string, unknown>): AuthUser | null {
+  const email = claims['email'] as string | undefined
+  const sub = claims['sub'] as string | undefined
+  if (!sub || !email) return null
+
+  const roles = parseRoles(claims)
+  const role = roles[0] ?? 'AUTHOR'
+  const tenantId = (claims['tenantId'] ?? claims['tenant_id']) as string | undefined
+
+  return {
+    id: sub,
+    email,
+    firstName: typeof claims['given_name'] === 'string' ? claims['given_name'] : undefined,
+    lastName: typeof claims['family_name'] === 'string' ? claims['family_name'] : undefined,
+    tenantId: tenantId ?? '',
+    role,
+  }
+}
+
 export function useAuth() {
   const [ready,  setReady]  = useState(false)
   const [authed, setAuthed] = useState(false)
   const [user,   setUser]   = useState<AuthUser | null>(null)
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const token = getAuthToken()
+    const isCallback = window.location.pathname === '/auth/callback'
+
+    if (token && !isCallback) {
+      const claims = parseJwtPayload(token)
+      if (claims) {
+        const parsedUser = extractUserFromClaims(claims)
+        if (parsedUser) {
+          setUser(parsedUser)
+          setAuthed(true)
+        }
+      }
+
+      setReady(true)
+      return
+    }
+
+    if (!isCallback) {
+      setReady(true)
+      return
+    }
+
     const k = getKC()
 
     let initPromise: Promise<boolean>
     if (kcInitialized) {
-      // Strict Mode second run — instance already initialised, reuse current state
       initPromise = Promise.resolve(k.authenticated ?? false)
     } else {
-      // Set synchronously so the second run sees it before .init() resolves
       kcInitialized = true
       initPromise = k.init({
         onLoad: 'check-sso',
