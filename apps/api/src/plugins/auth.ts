@@ -48,12 +48,59 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
       const sub     = payload['sub'] as string | undefined
       if (!sub) throw new Error('No sub in token')
 
-      const dbUser = await prisma.user.findUnique({
+      let dbUser = await prisma.user.findUnique({
         where:  { keycloakId: sub },
         select: { id: true, tenantId: true, keycloakId: true, email: true,
                   firstName: true, lastName: true, orcid: true, role: true, status: true },
       })
-      if (!dbUser || dbUser.status !== 'ACTIVE') throw new Error('User inactive')
+
+      // Auto-provision: first time a valid Keycloak user hits the API
+      if (!dbUser) {
+        const email     = payload['email']       as string | undefined
+        const firstName = payload['given_name']  as string | undefined
+        const lastName  = payload['family_name'] as string | undefined
+
+        if (!email) throw new Error('Token missing email claim')
+
+        // Get or create a personal tenant for this user
+        const slugBase = email.split('@')[0].replace(/[^a-z0-9]/gi, '').toLowerCase()
+        const slug     = `${slugBase}-${sub.slice(0, 8)}`
+
+        const tenant = await prisma.tenant.upsert({
+          where:  { slug },
+          update: {},
+          create: {
+            name:   email.split('@')[0],
+            slug,
+            plan:   'STARTER',
+            status: 'ACTIVE',
+          },
+        })
+
+        // Derive role from realm_access or default to AUTHOR
+        const realmRoles = (payload['realm_access'] as { roles?: string[] } | undefined)?.roles ?? []
+        const ROLE_PRIORITY = ['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR','COPY_EDITOR',
+          'ARTWORK_EDITOR','TYPESETTER','PEER_REVIEWER','AUTHOR','READER']
+        const role = ROLE_PRIORITY.find(r => realmRoles.includes(r)) ?? 'AUTHOR'
+
+        dbUser = await prisma.user.create({
+          data: {
+            keycloakId: sub,
+            tenantId:   tenant.id,
+            email,
+            firstName:  firstName ?? null,
+            lastName:   lastName  ?? null,
+            role:       role as any,
+            status:     'ACTIVE',
+          },
+          select: { id: true, tenantId: true, keycloakId: true, email: true,
+                    firstName: true, lastName: true, orcid: true, role: true, status: true },
+        })
+
+        app.log.info({ sub, email, role }, '✅ Auto-provisioned new user')
+      }
+
+      if (dbUser.status !== 'ACTIVE') throw new Error('User inactive')
 
       req.user = dbUser as AuthUser
     } catch {

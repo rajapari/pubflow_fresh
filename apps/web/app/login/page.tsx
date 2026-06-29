@@ -2,32 +2,17 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Header } from '@/components/Header'
 import { Footer } from '@/components/Footer'
-import { ArrowRight, Mail, Lock, ExternalLink } from 'lucide-react'
+import { ArrowRight, Mail, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { saveAuthToken } from '@/lib/auth'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [isDemo, setIsDemo] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-
-  useEffect(() => {
-    // Avoid next/navigation useSearchParams during prerender; read from window at runtime
-    try {
-      const params = new URLSearchParams(window.location.search)
-      if (params.get('demo') === 'true') {
-        setIsDemo(true)
-        setEmail('demo@example.com')
-        setPassword('demo-password')
-      }
-    } catch (e) {
-      // noop in non-browser environments
-    }
-  }, [])
   const [isLoading, setIsLoading] = useState(false)
 
   const handleOAuthLogin = (provider: 'keycloak' | 'google' | 'github') => {
@@ -45,14 +30,34 @@ export default function LoginPage() {
     e.preventDefault()
     setIsLoading(true)
     try {
-      // Simulate login for demo
-      if (email === 'demo@example.com' && password === 'demo-password') {
-        toast.success('Demo login successful!')
-        saveAuthToken('demo-token-' + Date.now())
-        router.push('/dashboard')
-      } else {
-        toast.error('Invalid credentials. Try demo@example.com / demo-password')
+      const kcUrl    = process.env.NEXT_PUBLIC_KEYCLOAK_URL    ?? 'http://localhost:8080'
+      const kcRealm  = process.env.NEXT_PUBLIC_KEYCLOAK_REALM  ?? 'pubflow'
+      const kcClient = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID ?? 'pubflow-web'
+
+      const res = await fetch(`${kcUrl}/realms/${kcRealm}/protocol/openid-connect/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'password',
+          client_id:  kcClient,
+          username:   email,
+          password,
+        }),
+      })
+      const data = await res.json()
+
+      if (!data.access_token) {
+        const msg = data.error_description ?? data.error ?? 'Invalid email or password'
+        toast.error(msg === 'Invalid user credentials' ? 'Invalid email or password' : msg)
+        return
       }
+
+      saveAuthToken(data.access_token)
+      const redirect = new URLSearchParams(window.location.search).get('redirect') ?? '/dashboard'
+      toast.success('Signed in successfully!')
+      router.push(redirect)
+    } catch {
+      toast.error('Login failed. Please try again.')
     } finally {
       setIsLoading(false)
     }
@@ -70,15 +75,6 @@ export default function LoginPage() {
               <h1 className="text-3xl font-bold text-gray-900">Welcome Back</h1>
               <p className="mt-2 text-gray-600">Sign in to your PubFlow account</p>
             </div>
-
-            {/* Demo Banner */}
-            {isDemo && (
-              <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 p-4">
-                <p className="text-sm font-medium text-blue-900">
-                  Demo Mode: Use credentials below to explore
-                </p>
-              </div>
-            )}
 
             {/* OAuth Buttons */}
             <div className="space-y-3 mb-6">
@@ -153,19 +149,6 @@ export default function LoginPage() {
                 {!isLoading && <ArrowRight className="h-4 w-4" />}
               </button>
             </form>
-
-            {/* Demo Info */}
-            {isDemo && (
-              <div className="mt-4 rounded-lg bg-gray-50 p-4 border border-gray-200">
-                <p className="text-xs font-mono text-gray-600 mb-2">Demo Credentials:</p>
-                <p className="text-xs text-gray-700 mb-1">
-                  <span className="font-medium">Email:</span> demo@example.com
-                </p>
-                <p className="text-xs text-gray-700">
-                  <span className="font-medium">Password:</span> demo-password
-                </p>
-              </div>
-            )}
 
             {/* Sign Up Link */}
             <div className="mt-6 text-center">

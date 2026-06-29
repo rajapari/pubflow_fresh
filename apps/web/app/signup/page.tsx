@@ -55,10 +55,21 @@ export default function SignupPage() {
 
     setIsLoading(true)
     try {
-      // Simulate signup
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: formData.name, email: formData.email, password: formData.password }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Registration failed')
+        return
+      }
+      saveAuthToken(data.token)
       toast.success('Account created successfully!')
-      saveAuthToken('demo-token-' + Date.now())
       router.push('/dashboard')
+    } catch {
+      toast.error('Registration failed. Please try again.')
     } finally {
       setIsLoading(false)
     }
