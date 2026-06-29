@@ -9,6 +9,23 @@ export const userRouter = router({
                 orcid:true, affiliation:true, role:true, createdAt:true },
     })
   }),
+
+  updateProfile: protectedProcedure
+    .input(z.object({
+      firstName:   z.string().min(1).max(100).optional(),
+      lastName:    z.string().max(100).optional(),
+      orcid:       z.string().max(50).optional().nullable(),
+      affiliation: z.string().max(200).optional().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.prisma.user.update({
+        where:  { id: ctx.user.id },
+        data:   input,
+        select: { id:true, email:true, firstName:true, lastName:true,
+                  orcid:true, affiliation:true, role:true, createdAt:true },
+      })
+    }),
+
   list: protectedProcedure
     .input(z.object({ role: z.enum(['SUPER_ADMIN', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'ARTWORK_EDITOR', 'TYPESETTER', 'PEER_REVIEWER', 'AUTHOR', 'READER']).optional() }))
     .query(async ({ ctx, input }) => {

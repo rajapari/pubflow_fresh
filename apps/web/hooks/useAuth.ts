@@ -174,7 +174,15 @@ export function useAuth() {
 
   const logout = useCallback(() => {
     clearAuthToken()
-    getKC().logout({ redirectUri: window.location.origin })
+    if (kcInitialized) {
+      try {
+        getKC().logout({ redirectUri: window.location.origin })
+        return
+      } catch {
+        // fall through to manual redirect below
+      }
+    }
+    window.location.href = '/'
   }, [])
 
   return { ready, authed, user, login, logout }

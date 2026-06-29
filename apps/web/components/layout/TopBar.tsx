@@ -1,10 +1,12 @@
 'use client'
 import { Bell, LogOut, User, ChevronDown } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 export function TopBar() {
   const { user, logout } = useAuth()
+  const router = useRouter()
   const [open, setOpen]  = useState(false)
 
   return (
@@ -36,7 +38,10 @@ export function TopBar() {
                   <p className="text-xs font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
                   <p className="text-xs text-gray-400">{user?.email}</p>
                 </div>
-                <button className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setOpen(false)}>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  onClick={() => { setOpen(false); router.push('/dashboard/profile') }}
+                >
                   <User size={14} className="text-gray-400" /> Profile
                 </button>
                 <button className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50" onClick={() => { setOpen(false); logout() }}>
