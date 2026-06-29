@@ -59,8 +59,6 @@ export default function ReviewsPage() {
     return r.status === filter
   })
 
-  if (reviews.isLoading) return <div className="p-8">Loading...</div>
-
   return (
     <div className="max-w-6xl mx-auto py-8">
       <h1 className="text-3xl font-bold text-gray-900 mb-6">My Reviews</h1>
@@ -81,7 +79,11 @@ export default function ReviewsPage() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {reviews.isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="bg-gray-50 rounded-lg p-8 text-center">
           <p className="text-gray-600">No reviews found for this filter</p>
         </div>

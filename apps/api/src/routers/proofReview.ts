@@ -204,6 +204,41 @@ export const proofReviewRouter = router({
       return updatedReview
     }),
 
+  // List all proof reviews across submissions (for editors)
+  listAll: protectedProcedure
+    .input(z.object({
+      status: z.enum(['OPEN', 'IN_PROGRESS', 'APPROVED', 'REJECTED', 'NEEDS_REVISION', 'SUBMITTED']).optional(),
+      page: z.number().min(1).default(1),
+      limit: z.number().min(1).max(100).default(20),
+    }))
+    .query(async ({ ctx, input }) => {
+      const isEditor = ctx.user.role === 'EDITOR_IN_CHIEF' || ctx.user.role === 'SECTION_EDITOR' || ctx.user.role === 'SUPER_ADMIN'
+      if (!isEditor)
+        throw new Error('Only editors can list all proof reviews')
+
+      const where: Record<string, unknown> = {
+        submission: { tenantId: ctx.user.tenantId },
+      }
+      if (input.status) where['status'] = input.status
+
+      const [reviews, total] = await Promise.all([
+        ctx.prisma.proofReview.findMany({
+          where,
+          include: {
+            submission: { select: { id: true, title: true, status: true } },
+            reviewer: { select: { id: true, firstName: true, lastName: true, email: true } },
+            output: { select: { id: true, format: true, status: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          skip: (input.page - 1) * input.limit,
+          take: input.limit,
+        }),
+        ctx.prisma.proofReview.count({ where }),
+      ])
+
+      return { reviews, total, page: input.page, limit: input.limit }
+    }),
+
   // Get list of outputs (to link with proof review)
   listOutputs: protectedProcedure
     .input(z.object({ submissionId: z.string().uuid() }))

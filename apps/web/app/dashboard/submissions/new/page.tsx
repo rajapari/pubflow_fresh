@@ -78,9 +78,6 @@ export default function NewSubmissionPage() {
     }
   }
 
-  if (publications.isLoading) return <div>Loading...</div>
-  if (publications.error) return <div>Error loading publications</div>
-
   return (
     <div className="max-w-2xl mx-auto py-8">
       <div className="mb-8">
@@ -100,6 +97,7 @@ export default function NewSubmissionPage() {
               {...register('publicationId')}
               options={publications.data?.map((p) => ({ value: p.id, label: p.title })) ?? []}
               error={errors.publicationId?.message}
+              disabled={publications.isLoading}
               required
             />
             <FormField

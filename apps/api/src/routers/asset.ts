@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure } from '../trpc/procedures.js'
 
 export const assetRouter = router({
@@ -182,6 +183,42 @@ export const assetRouter = router({
       })
 
       return asset
+    }),
+
+  // List all assets across submissions (for artwork editors/section editors)
+  listAll: protectedProcedure
+    .input(z.object({
+      status: z.enum(['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED', 'NEEDS_REVISION']).optional(),
+      assetType: z.enum(['FIGURE', 'TABLE', 'SUPPLEMENTARY', 'COVER']).optional(),
+      page: z.number().min(1).default(1),
+      limit: z.number().min(1).max(100).default(20),
+    }))
+    .query(async ({ ctx, input }) => {
+      const allowed = ['SUPER_ADMIN', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'ARTWORK_EDITOR']
+      if (!allowed.includes(ctx.user.role))
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only editors can list all assets' })
+
+      const where: Record<string, unknown> = {
+        submission: { tenantId: ctx.user.tenantId },
+      }
+      if (input.status) where['status'] = input.status
+      if (input.assetType) where['assetType'] = input.assetType
+
+      const [assets, total] = await Promise.all([
+        ctx.prisma.asset.findMany({
+          where,
+          include: {
+            submission: { select: { id: true, title: true, status: true } },
+            uploadedBy: { select: { id: true, firstName: true, lastName: true } },
+          },
+          orderBy: { uploadedAt: 'desc' },
+          skip: (input.page - 1) * input.limit,
+          take: input.limit,
+        }),
+        ctx.prisma.asset.count({ where }),
+      ])
+
+      return { assets, total, page: input.page, limit: input.limit }
     }),
 
   // Delete asset (author/editor only)

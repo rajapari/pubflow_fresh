@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import type { AnyRouter } from '@trpc/server'
-import { router, protectedProcedure, chiefEditorProcedure } from '../trpc/procedures.js'
+import { router, protectedProcedure, editorProcedure, chiefEditorProcedure } from '../trpc/procedures.js'
 import { CreateSubmissionSchema, EditorialDecisionSchema,
          SubmissionStatusSchema, SubmissionStatus, isValidTransition } from '@pubflow/types'
 import { MinioStorage } from '../plugins/minio.js'
@@ -393,16 +393,64 @@ export const submissionRouter = router({
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      // Authors can only see their own manuscript versions
       if (user.role === 'AUTHOR' && sub.authorId !== user.id) {
         throw new TRPCError({ code: 'FORBIDDEN' })
       }
 
-      const manuscripts = await prisma.manuscript.findMany({
+      return prisma.manuscript.findMany({
         where: { submissionId: input.submissionId },
         orderBy: { version: 'desc' },
       })
+    }),
 
-      return manuscripts
+  stats: protectedProcedure.query(async ({ ctx }) => {
+    const { user, prisma } = ctx
+    const where = { tenantId: user.tenantId }
+
+    const groups = await prisma.submission.groupBy({
+      by: ['status'],
+      where,
+      _count: { id: true },
+    })
+
+    const statusCounts: Record<string, number> = {}
+    let total = 0
+    for (const g of groups) {
+      statusCounts[g.status] = g._count.id
+      total += g._count.id
+    }
+
+    return { total, statusCounts }
+  }),
+
+  advanceStatus: editorProcedure
+    .input(z.object({
+      submissionId: z.string().uuid(),
+      toStatus: SubmissionStatusSchema,
+      note: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (!isValidTransition(sub.status, input.toStatus))
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot transition from ${sub.status} to ${input.toStatus}` })
+
+      return prisma.submission.update({
+        where: { id: input.submissionId },
+        data: {
+          status: input.toStatus,
+          workflowLogs: {
+            create: {
+              fromStatus: sub.status,
+              toStatus: input.toStatus,
+              performedBy: user.id,
+              note: input.note,
+            },
+          },
+        },
+      })
     }),
 })
