@@ -1,5 +1,7 @@
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure } from '../trpc/procedures.js'
+import { QUEUES } from '@pubflow/types'
 
 export const proofReviewRouter = router({
   // List all proof reviews for a submission
@@ -71,13 +73,13 @@ export const proofReviewRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Only editors can assign reviewers
       if (ctx.user.role !== 'EDITOR_IN_CHIEF' && ctx.user.role !== 'SECTION_EDITOR') {
         throw new Error('Only editors can assign proof reviewers')
       }
 
       const submission = await ctx.prisma.submission.findUniqueOrThrow({
         where: { id: input.submissionId },
+        include: { author: true },
       })
 
       if (submission.status !== 'TYPESETTING' && submission.status !== 'PROOF_REVIEW') {
@@ -88,11 +90,10 @@ export const proofReviewRouter = router({
         where: { id: input.reviewerId },
       })
 
-      if (reviewer.role !== 'SECTION_EDITOR' && reviewer.role !== 'EDITOR_IN_CHIEF') {
-        throw new Error('User must have SECTION_EDITOR or EDITOR_IN_CHIEF role')
+      if (!['SECTION_EDITOR', 'EDITOR_IN_CHIEF', 'PROOF_READER'].includes(reviewer.role)) {
+        throw new Error('User must be SECTION_EDITOR, EDITOR_IN_CHIEF, or PROOF_READER')
       }
 
-      // Check for existing open review
       const existing = await ctx.prisma.proofReview.findFirst({
         where: {
           submissionId: input.submissionId,
@@ -118,7 +119,6 @@ export const proofReviewRouter = router({
         },
       })
 
-      // Log the assignment
       await ctx.prisma.workflowLog.create({
         data: {
           submissionId: input.submissionId,
@@ -127,6 +127,14 @@ export const proofReviewRouter = router({
           note: `Assigned proof reviewer: ${reviewer.email}`,
           metadata: { reviewerId: input.reviewerId, round: input.round },
         },
+      })
+
+      // Notify the author that their proof is ready for review
+      await ctx.queues[QUEUES.NOTIFICATION].add('proof-ready', {
+        type: 'NOTIFICATION',
+        to: [submission.author.email],
+        template: 'PROOF_READY',
+        data: { submissionId: input.submissionId, title: submission.title },
       })
 
       return review
@@ -190,15 +198,25 @@ export const proofReviewRouter = router({
 
       const allSubmitted = allReviews.every(r => r.status === 'SUBMITTED' || r.id === input.id)
       if (allSubmitted) {
-        // Determine next status based on reviewer decisions
-        const decisions = allReviews.map(r => r.status)
-        const hasRejections = decisions.includes('REJECTED')
+        const hasRejections = allReviews.some(
+          r => r.id === input.id ? input.status === 'REJECTED' : r.status === 'REJECTED'
+        )
         const nextStatus = hasRejections ? 'REVISION_REQUIRED' : 'APPROVED'
 
-        await ctx.prisma.submission.update({
+        const updatedSub = await ctx.prisma.submission.update({
           where: { id: review.submissionId },
           data: { status: nextStatus },
+          include: { author: true },
         })
+
+        if (nextStatus === 'REVISION_REQUIRED') {
+          await ctx.queues[QUEUES.NOTIFICATION].add('proof-revision-requested', {
+            type: 'NOTIFICATION',
+            to: [updatedSub.author.email],
+            template: 'REVISION_REQUESTED',
+            data: { submissionId: review.submissionId, title: updatedSub.title },
+          })
+        }
       }
 
       return updatedReview
@@ -237,6 +255,20 @@ export const proofReviewRouter = router({
       ])
 
       return { reviews, total, page: input.page, limit: input.limit }
+    }),
+
+  // Get a presigned download URL for a typeset output
+  getDownloadUrl: protectedProcedure
+    .input(z.object({ outputId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { user, prisma, minio } = ctx
+      const output = await prisma.output.findUniqueOrThrow({ where: { id: input.outputId } })
+      const sub = await prisma.submission.findUnique({ where: { id: output.submissionId } })
+      if (sub?.tenantId !== user.tenantId) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (!output.minioKey) throw new TRPCError({ code: 'NOT_FOUND', message: 'Output file not yet available' })
+
+      const url = await minio.client.presignedGetObject(minio.bucket, output.minioKey, 3600)
+      return { url, format: output.format }
     }),
 
   // Get list of outputs (to link with proof review)

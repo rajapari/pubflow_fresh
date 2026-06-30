@@ -36,6 +36,25 @@ export const publicationRouter = router({
       })
     }),
 
+  update: chiefEditorProcedure
+    .input(z.object({
+      id:                   z.string().uuid(),
+      title:                z.string().min(1).max(500).optional(),
+      description:          z.string().max(5000).optional(),
+      issn:                 z.string().optional(),
+      isbn:                 z.string().optional(),
+      submissionGuidelines: z.string().max(20000).optional(),
+      reviewerInstructions: z.string().max(20000).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input
+      const pub = await ctx.prisma.publication.findFirst({
+        where: { id, tenantId: ctx.user.tenantId },
+      })
+      if (!pub) throw new TRPCError({ code: 'NOT_FOUND' })
+      return ctx.prisma.publication.update({ where: { id }, data })
+    }),
+
   archive: chiefEditorProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
@@ -65,6 +84,8 @@ export const tenantRouter = router({
       enablePeerReview:      z.boolean().optional(),
       enableDoiRegistration: z.boolean().optional(),
       doiPrefix:             z.string().optional(),
+      crossrefLoginId:       z.string().optional(),
+      crossrefLoginPassword: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       return ctx.prisma.tenantSettings.upsert({

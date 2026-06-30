@@ -7,6 +7,18 @@ import { CreateSubmissionSchema, EditorialDecisionSchema,
 import { MinioStorage } from '../plugins/minio.js'
 import { QUEUES } from '@pubflow/types'
 import { createHmac } from 'crypto'
+import { Client as MinioClient } from 'minio'
+
+const FORMAT_TO_FILETYPE: Record<string, string> = {
+  DOCX: 'docx', ODT: 'odt', RTF: 'rtf', PDF: 'pdf', MARKDOWN: 'txt',
+}
+
+function signJwt(payload: object, secret: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')
+  const body   = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  const sig    = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url')
+  return `${header}.${body}.${sig}`
+}
 
 type ManuscriptFormat = 'DOCX' | 'LATEX' | 'MARKDOWN' | 'ODT' | 'RTF' | 'PDF' | 'ZIP'
 
@@ -151,10 +163,19 @@ export const submissionRouter = router({
         }),
       ])
 
+      // Always notify author of the decision
       await queues[QUEUES.NOTIFICATION].add('decision', {
         type: 'NOTIFICATION', to: [], template: 'DECISION_MADE',
         data: { submissionId: input.submissionId, decision: input.decision },
       })
+
+      // Send a focused revision-requested notification for revision decisions
+      if (nextStatus === 'REVISION_REQUIRED') {
+        await queues[QUEUES.NOTIFICATION].add('revision-requested', {
+          type: 'NOTIFICATION', to: [], template: 'REVISION_REQUESTED',
+          data: { submissionId: input.submissionId, decision: input.decision },
+        })
+      }
 
       return { success: true }
     }),
@@ -359,20 +380,41 @@ export const submissionRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'No manuscript uploaded yet' })
       }
 
-      // Get presigned URL for the manuscript file
-      const presignedUrl = await minio.client.presignedGetObject(minio.bucket, manuscript.minioKey, 900)
+      const fileType = FORMAT_TO_FILETYPE[manuscript.format]
+      if (!fileType) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `${manuscript.format} manuscripts cannot be edited in the browser editor. Please download the file instead.`,
+        })
+      }
 
-      // Generate OnlyOffice JWT token
+      // Generate a presigned URL using the MinIO host that OnlyOffice can reach.
+      // When OnlyOffice runs in Docker (tools network) it cannot reach `localhost:9000`;
+      // set ONLYOFFICE_MINIO_HOST=minio (Docker service name) in that case.
+      const ooMinioHost = process.env.ONLYOFFICE_MINIO_HOST ?? process.env.MINIO_ENDPOINT ?? 'localhost'
+      const ooMinioClient = new MinioClient({
+        endPoint: ooMinioHost,
+        port:     Number(process.env.MINIO_PORT ?? 9000),
+        useSSL:   process.env.MINIO_USE_SSL === 'true',
+        accessKey: process.env.MINIO_ACCESS_KEY ?? '',
+        secretKey: process.env.MINIO_SECRET_KEY ?? '',
+      })
+      const docUrl = await ooMinioClient.presignedGetObject(minio.bucket, manuscript.minioKey, 900)
+
+      // OnlyOffice caches documents by key; use manuscript.id so a new upload gets a fresh key.
+      const docKey = manuscript.id.replace(/-/g, '')
+
       const jwtSecret = process.env.ONLYOFFICE_JWT_SECRET || 'default-secret'
+      const callbackBase = process.env.ONLYOFFICE_CALLBACK_URL ?? process.env.API_URL ?? 'http://localhost:3001'
       const payload = {
         document: {
-          fileType: 'docx',
-          key: input.submissionId,
+          fileType,
+          key: docKey,
           title: sub.title || 'Manuscript',
-          url: presignedUrl,
+          url: docUrl,
         },
         editorConfig: {
-          callbackUrl: `${process.env.API_URL || 'http://localhost:3001'}/wopi/callback/${input.submissionId}`,
+          callbackUrl: `${callbackBase}/wopi/callback/${input.submissionId}`,
           user: {
             id: user.id,
             name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
@@ -393,9 +435,7 @@ export const submissionRouter = router({
         },
       }
 
-      const token = createHmac('sha256', jwtSecret)
-        .update(JSON.stringify(payload))
-        .digest('hex')
+      const token = signJwt(payload, jwtSecret)
 
       return {
         onlyofficeUrl: process.env.ONLYOFFICE_URL || 'http://localhost:8081',

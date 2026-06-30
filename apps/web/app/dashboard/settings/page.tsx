@@ -30,6 +30,8 @@ export default function SettingsPage() {
     enablePeerReview:      true,
     enableDoiRegistration: false,
     doiPrefix:             '',
+    crossrefLoginId:       '',
+    crossrefLoginPassword: '',
   })
 
   useEffect(() => {
@@ -40,6 +42,8 @@ export default function SettingsPage() {
         enablePeerReview:      settings.enablePeerReview      ?? true,
         enableDoiRegistration: settings.enableDoiRegistration ?? false,
         doiPrefix:             settings.doiPrefix             ?? '',
+        crossrefLoginId:       (settings as any).crossrefLoginId       ?? '',
+        crossrefLoginPassword: (settings as any).crossrefLoginPassword ?? '',
       })
     }
   }, [settings])
@@ -53,6 +57,8 @@ export default function SettingsPage() {
         enablePeerReview:      form.enablePeerReview,
         enableDoiRegistration: form.enableDoiRegistration,
         doiPrefix:             form.doiPrefix || undefined,
+        crossrefLoginId:       form.crossrefLoginId || undefined,
+        crossrefLoginPassword: form.crossrefLoginPassword || undefined,
       })
       toast.success('Settings saved')
       tenantQ.refetch()
@@ -194,14 +200,42 @@ export default function SettingsPage() {
           </label>
 
           {form.enableDoiRegistration && (
-            <div className="flex items-center gap-4 ml-7">
-              <label className="block text-sm font-medium text-gray-700 w-32">DOI prefix</label>
-              <input
-                value={form.doiPrefix}
-                onChange={e => setForm(f => ({ ...f, doiPrefix: e.target.value }))}
-                placeholder="10.12345"
-                className="flex-1 max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono"
-              />
+            <div className="ml-7 space-y-3">
+              <div className="flex items-center gap-4">
+                <label className="block text-sm font-medium text-gray-700 w-40">DOI prefix</label>
+                <input
+                  value={form.doiPrefix}
+                  onChange={e => setForm(f => ({ ...f, doiPrefix: e.target.value }))}
+                  placeholder="10.12345"
+                  className="flex-1 max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono"
+                />
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="block text-sm font-medium text-gray-700 w-40">CrossRef login ID</label>
+                <input
+                  value={form.crossrefLoginId}
+                  onChange={e => setForm(f => ({ ...f, crossrefLoginId: e.target.value }))}
+                  placeholder="your.login@crossref.org"
+                  autoComplete="off"
+                  className="flex-1 max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="block text-sm font-medium text-gray-700 w-40">CrossRef password</label>
+                <input
+                  type="password"
+                  value={form.crossrefLoginPassword}
+                  onChange={e => setForm(f => ({ ...f, crossrefLoginPassword: e.target.value }))}
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                  className="flex-1 max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+              <p className="text-xs text-gray-400">
+                Credentials are stored encrypted. DOI deposits go to CrossRef&apos;s test endpoint unless
+                <code className="mx-1 rounded bg-gray-100 px-1 py-0.5">CROSSREF_TEST_MODE=false</code>
+                is set on the server.
+              </p>
             </div>
           )}
         </div>

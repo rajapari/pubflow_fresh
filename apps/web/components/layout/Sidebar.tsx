@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, FileText, BookOpen, Users, Image, Type, Eye, Settings, BookMarked } from 'lucide-react'
+import { LayoutDashboard, FileText, BookOpen, Users, Image, Type, Eye, Settings, BookMarked, PenLine, MessageSquare, BarChart2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -9,10 +9,13 @@ const NAV = [
   { label:'Dashboard',   href:'/dashboard',             icon:LayoutDashboard, roles:['ALL'] },
   { label:'Submissions', href:'/dashboard/submissions',  icon:FileText,        roles:['ALL'] },
   { label:'Publications',href:'/dashboard/publications', icon:BookOpen,        roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR'] },
-  { label:'Editorial',   href:'/dashboard/editorial',    icon:Users,           roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR','PEER_REVIEWER'] },
-  { label:'Artwork',     href:'/dashboard/artwork',      icon:Image,           roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','ARTWORK_EDITOR'] },
-  { label:'Typesetting', href:'/dashboard/typesetting',  icon:Type,            roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','TYPESETTER'] },
-  { label:'Proofing',    href:'/dashboard/proofing',     icon:Eye,             roles:['ALL'] },
+  { label:'Editorial',    href:'/dashboard/editorial',    icon:Users,    roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR','PEER_REVIEWER'] },
+  { label:'Reviews',      href:'/dashboard/reviews',      icon:MessageSquare, roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR','PEER_REVIEWER'] },
+  { label:'Copy Editing', href:'/dashboard/copyediting',  icon:PenLine,  roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR','COPY_EDITOR'] },
+  { label:'Artwork',      href:'/dashboard/artwork',       icon:Image,    roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','ARTWORK_EDITOR'] },
+  { label:'Typesetting',  href:'/dashboard/typesetting',   icon:Type,     roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','TYPESETTER'] },
+  { label:'Proofing',     href:'/dashboard/proofing',      icon:Eye,      roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR','PROOF_READER'] },
+  { label:'Analytics',   href:'/dashboard/analytics',     icon:BarChart2,  roles:['SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR'] },
   { label:'Settings',    href:'/dashboard/settings',     icon:Settings,        roles:['SUPER_ADMIN','EDITOR_IN_CHIEF'] },
 ]
 

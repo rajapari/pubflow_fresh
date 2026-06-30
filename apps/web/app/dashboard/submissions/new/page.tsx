@@ -63,8 +63,13 @@ export default function NewSubmissionPage() {
     name: 'coAuthors',
   })
 
-  const keywords    = watch('keywords')
-  const publications = trpc.publication.list.useQuery()
+  const keywords       = watch('keywords')
+  const selectedPubId  = watch('publicationId')
+  const publications   = trpc.publication.list.useQuery()
+  const selectedPub    = trpc.publication.byId.useQuery(
+    { id: selectedPubId },
+    { enabled: !!selectedPubId }
+  )
   const createSubmission = trpc.submission.create.useMutation()
 
   // Validate current step's fields before advancing
@@ -141,6 +146,22 @@ export default function NewSubmissionPage() {
               disabled={publications.isLoading}
               required
             />
+            {/* Submission guidelines for the selected publication */}
+            {selectedPubId && (selectedPub.data as any)?.submissionGuidelines && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                  <p className="text-xs font-semibold text-amber-800">Submission Guidelines</p>
+                </div>
+                <pre className="text-xs text-amber-900 whitespace-pre-wrap font-sans leading-relaxed">
+                  {(selectedPub.data as any).submissionGuidelines}
+                </pre>
+                <p className="mt-2 text-xs text-amber-700 font-medium">
+                  Please read the guidelines above before continuing.
+                </p>
+              </div>
+            )}
+
             <FormField
               label="Title"
               {...register('title')}

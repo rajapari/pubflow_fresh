@@ -1,10 +1,11 @@
-import { Worker } from 'bullmq'
+import { Worker, Queue } from 'bullmq'
 import { QUEUES } from '@pubflow/types'
 import { pandocProcessor }       from './processors/pandoc.js'
 import { latexProcessor }        from './processors/latex.js'
 import { scribusProcessor }      from './processors/scribus.js'
 import { imageProcessor }        from './processors/image.js'
 import { notificationProcessor } from './processors/notification.js'
+import { schedulerProcessor }    from './processors/scheduler.js'
 
 function parseRedisUrl(url: string) {
   try {
@@ -44,7 +45,25 @@ const workers = [
   new Worker(QUEUES.SCRIBUS,      scribusProcessor,      { ...workerOpts, concurrency: 2 }),
   new Worker(QUEUES.IMAGE,        imageProcessor,        { ...workerOpts, concurrency: 8 }),
   new Worker(QUEUES.NOTIFICATION, notificationProcessor, { ...workerOpts, concurrency: 10 }),
+  new Worker(QUEUES.SCHEDULER,    schedulerProcessor,    { ...workerOpts, concurrency: 1 }),
 ]
+
+// Register the daily review-reminder cron job.
+// Uses upsert semantics so restarting the worker never creates duplicate schedules.
+const schedulerQueue = new Queue(QUEUES.SCHEDULER, { connection })
+schedulerQueue
+  .add(
+    'review-reminder-daily',
+    { type: 'REVIEW_REMINDER_CHECK' },
+    {
+      repeat:           { pattern: '0 8 * * *' }, // 08:00 UTC every day
+      removeOnComplete: { count: 1 },
+      removeOnFail:     { count: 5 },
+      jobId:            'review-reminder-daily',   // idempotent — won't add duplicates
+    }
+  )
+  .then(() => console.info('✅ Scheduler: daily review-reminder cron registered (08:00 UTC)'))
+  .catch((err: Error) => console.error('⚠️  Scheduler: failed to register cron job:', err.message))
 
 workers.forEach((w) => {
   w.on('completed', (job) =>

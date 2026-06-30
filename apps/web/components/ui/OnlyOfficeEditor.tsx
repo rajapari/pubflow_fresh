@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 declare global {
   interface Window {
     DocsAPI?: {
-      DocEditor: new (containerId: string, config: object) => object
+      DocEditor: new (containerId: string, config: object) => {
+        destroyEditor?: () => void
+      }
     }
   }
 }
@@ -22,16 +24,8 @@ interface OnlyOfficeEditorProps {
     }
     editorConfig: {
       callbackUrl: string
-      user: {
-        id: string
-        name: string
-        email: string
-      }
-      customization: {
-        autosave: boolean
-        forcesave: boolean
-        commentAuthorOnly: boolean
-      }
+      user: { id: string; name: string; email: string }
+      customization: { autosave: boolean; forcesave: boolean; commentAuthorOnly: boolean }
     }
     permissions: {
       comment: boolean
@@ -44,58 +38,69 @@ interface OnlyOfficeEditorProps {
   token: string
 }
 
+const CONTAINER_ID = 'onlyoffice-container'
+
 export function OnlyOfficeEditor({ onlyofficeUrl, config, token }: OnlyOfficeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const editorRef    = useRef<{ destroyEditor?: () => void } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const initEditor = useCallback(() => {
-    if (!containerRef.current || !window.DocsAPI) return
-
-    try {
-      const editorConfig = {
-        ...config,
-        token,
-      }
-
-      new window.DocsAPI.DocEditor('onlyoffice-container', editorConfig)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to initialize editor'
-      setError(message)
-      toast.error(message)
-    }
-  }, [config, token])
+  const [error, setError]         = useState<string | null>(null)
 
   useEffect(() => {
-    // Load OnlyOffice API script
-    const scriptId = 'onlyoffice-api'
-    if (!document.getElementById(scriptId)) {
-      const script = document.createElement('script')
-      script.id = scriptId
-      script.src = `${onlyofficeUrl}/web-apps/apps/api/documents/api.js`
-      script.async = true
-      script.onload = () => {
+    const containerId = CONTAINER_ID
+
+    function initEditor() {
+      if (!containerRef.current || !window.DocsAPI) return
+      try {
+        editorRef.current = new window.DocsAPI.DocEditor(containerId, { ...config, token })
         setIsLoading(false)
-        initEditor()
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to initialize editor'
+        setError(msg)
+        setIsLoading(false)
+        toast.error(msg)
       }
+    }
+
+    const scriptId = 'onlyoffice-api'
+    const existing = document.getElementById(scriptId)
+
+    if (existing) {
+      // Script tag already in DOM — DocsAPI may already be available
+      if (window.DocsAPI) {
+        initEditor()
+      } else {
+        existing.addEventListener('load', initEditor, { once: true })
+      }
+    } else {
+      const script   = document.createElement('script')
+      script.id      = scriptId
+      script.src     = `${onlyofficeUrl}/web-apps/apps/api/documents/api.js`
+      script.async   = true
+      script.onload  = initEditor
       script.onerror = () => {
-        setError('Failed to load OnlyOffice API')
+        setError('Failed to load OnlyOffice API. Is OnlyOffice running?')
         setIsLoading(false)
         toast.error('Failed to load OnlyOffice editor')
       }
       document.head.appendChild(script)
-    } else {
-      setIsLoading(false)
-      initEditor()
     }
-  }, [onlyofficeUrl, initEditor])
+
+    return () => {
+      try { editorRef.current?.destroyEditor?.() } catch { /* ignore */ }
+      editorRef.current = null
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // config/token are stable for the lifetime of this editor instance
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
         <p className="font-medium">Editor Error</p>
         <p className="text-sm">{error}</p>
-        <p className="text-xs mt-2 text-red-600">Make sure OnlyOffice is running at {onlyofficeUrl}</p>
+        <p className="mt-2 text-xs text-red-600">
+          Make sure OnlyOffice is running at {onlyofficeUrl}
+        </p>
       </div>
     )
   }
@@ -105,15 +110,15 @@ export function OnlyOfficeEditor({ onlyofficeUrl, config, token }: OnlyOfficeEdi
       {isLoading && (
         <div className="flex items-center justify-center h-96 bg-gray-50">
           <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            <p className="mt-4 text-gray-600">Loading editor...</p>
+            <div className="inline-block h-10 w-10 animate-spin rounded-full border-b-2 border-brand-500" />
+            <p className="mt-4 text-sm text-gray-600">Loading editor…</p>
           </div>
         </div>
       )}
       <div
         ref={containerRef}
-        id="onlyoffice-container"
-        className={`flex-1 ${isLoading ? 'hidden' : 'block'}`}
+        id={CONTAINER_ID}
+        className={isLoading ? 'hidden' : 'flex-1'}
         style={{ minHeight: '600px' }}
       />
     </div>

@@ -1,16 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { BookOpen, Plus, XCircle, Archive } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { BookOpen, Plus, XCircle, Archive, BookMarked } from 'lucide-react'
 import { toast } from 'sonner'
 import { trpc } from '@/components/providers'
-import { formatDate } from '@/lib/utils'
 
 const TYPE_LABELS: Record<string, string> = {
   JOURNAL: 'Journal', BOOK: 'Book', BOOK_SERIES: 'Book Series', PROCEEDINGS: 'Proceedings',
 }
 
 export default function PublicationsPage() {
+  const router = useRouter()
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ title: '', type: 'JOURNAL' as const, issn: '', isbn: '', description: '' })
 
@@ -97,7 +98,12 @@ export default function PublicationsPage() {
               )}
 
               <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-100 text-xs text-gray-400">
-                <span>{pub._count?.submissions ?? 0} submissions</span>
+                <button
+                  onClick={() => router.push(`/dashboard/publications/${pub.id}`)}
+                  className="flex items-center gap-1 text-brand-600 hover:text-brand-800 font-medium transition-colors"
+                >
+                  <BookMarked size={12} /> Manage Issues
+                </button>
                 <button
                   onClick={() => handleArchive(pub.id)}
                   disabled={archiveM.isPending}

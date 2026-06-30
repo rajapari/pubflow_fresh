@@ -115,12 +115,15 @@ export const reviewRouter = router({
       })
       if (!reviewer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Reviewer not found' })
 
+      const DEFAULT_REVIEW_DAYS = 21
+      const dueAt = input.dueAt ?? new Date(Date.now() + DEFAULT_REVIEW_DAYS * 86_400_000)
+
       const review = await prisma.review.create({
         data: {
           submissionId: input.submissionId,
           reviewerId: input.reviewerId,
           status: 'INVITED',
-          dueAt: input.dueAt,
+          dueAt,
         },
         include: { submission: true, reviewer: true },
       })
@@ -191,19 +194,31 @@ export const reviewRouter = router({
         },
       })
 
-      // Notify editor that review was submitted
-      const editors = await prisma.user.findMany({
-        where: { tenantId: user.tenantId, role: { in: ['EDITOR_IN_CHIEF', 'SECTION_EDITOR'] } },
-      })
-
+      // Notify editors that a review has been submitted (let worker resolve recipients)
       await queues[QUEUES.NOTIFICATION].add('review-submitted', {
         type: 'NOTIFICATION',
-        to: editors.map(e => e.email),
-        template: 'REVIEW_INVITED',
+        to: [],
+        template: 'REVIEW_SUBMITTED',
         data: { title: review.submission.title, reviewId: review.id, submissionId: review.submissionId },
       })
 
       return updated
+    }),
+
+  startReview: protectedProcedure
+    .input(z.object({ reviewId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const review = await prisma.review.findUnique({ where: { id: input.reviewId } })
+      if (!review) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (review.reviewerId !== user.id) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (review.status !== 'ACCEPTED')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Review must be ACCEPTED before starting' })
+
+      return prisma.review.update({
+        where: { id: input.reviewId },
+        data: { status: 'IN_PROGRESS' },
+      })
     }),
 
   listForSubmission: protectedProcedure

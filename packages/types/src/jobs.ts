@@ -51,8 +51,9 @@ export const NotificationJobSchema = z.object({
   type: z.literal('NOTIFICATION'),
   to: z.array(z.string().email()),
   template: z.enum([
-    'SUBMISSION_RECEIVED','REVIEW_INVITED','REVIEW_REMINDER',
+    'SUBMISSION_RECEIVED','REVIEW_INVITED','REVIEW_SUBMITTED','REVIEW_REMINDER',
     'DECISION_MADE','REVISION_REQUESTED','PROOF_READY','PUBLISHED',
+    'COPY_EDIT_ASSIGNED',
   ]),
   data: z.record(z.unknown()),
 })
@@ -64,5 +65,6 @@ export const QUEUES = {
   SCRIBUS: 'scribus',
   IMAGE: 'image',
   NOTIFICATION: 'notification',
+  SCHEDULER: 'scheduler',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

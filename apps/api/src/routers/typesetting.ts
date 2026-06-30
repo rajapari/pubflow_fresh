@@ -89,9 +89,21 @@ export const typeSettingRouter = router({
         inputMinioKey: sub.manuscripts[0].minioKey,
       }
 
+      const PANDOC_FORMAT: Record<string, string> = {
+        PDF_PRINT: 'pdf',
+        PDF_WEB:   'pdf',
+        EPUB:      'epub',
+        HTML:      'html',
+        JATS_XML:  'jats',
+        DOCX:      'docx',
+        BIBTEX:    'bibtex',
+      }
+
       if (input.engine === 'PANDOC') {
+        const pandocFmt = PANDOC_FORMAT[input.outputFormat]
+        if (!pandocFmt) throw new TRPCError({ code: 'BAD_REQUEST', message: `${input.outputFormat} is not supported by Pandoc` })
         jobData['inputFormat']  = sub.manuscripts[0].format.toLowerCase()
-        jobData['outputFormat'] = input.outputFormat.toLowerCase().replace('_print', '').replace('_web', '')
+        jobData['outputFormat'] = pandocFmt
         jobData['options']      = { citationStyle: 'apa' }
       } else if (input.engine === 'LATEX') {
         jobData['documentClass'] = 'article'

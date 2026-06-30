@@ -164,6 +164,14 @@ enum ProofReviewStatus {
   SUBMITTED
 }
 
+enum CopyEditStatus {
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  REVISION_REQUESTED
+}
+
 enum SubscriptionStatus {
   ACTIVE
   PAST_DUE
@@ -204,6 +212,8 @@ model TenantSettings {
   enablePeerReview      Boolean @default(true)
   enableDoiRegistration Boolean @default(false)
   doiPrefix             String?
+  crossrefLoginId       String?
+  crossrefLoginPassword String?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -231,6 +241,7 @@ model User {
   uploadedAssets     Asset[]
 
   proofReviews       ProofReview[]
+  copyEdits          CopyEdit[]    @relation("CopyEditorAssignment")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -239,17 +250,19 @@ model User {
 }
 
 model Publication {
-  id          String            @id @default(uuid())
-  tenantId    String
-  title       String
-  type        PublicationType   @default(JOURNAL)
-  issn        String?
-  isbn        String?
-  description String?
-  coverUrl    String?
-  status      PublicationStatus @default(ACTIVE)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id                   String            @id @default(uuid())
+  tenantId             String
+  title                String
+  type                 PublicationType   @default(JOURNAL)
+  issn                 String?
+  isbn                 String?
+  description          String?
+  coverUrl             String?
+  submissionGuidelines String?
+  reviewerInstructions String?
+  status               PublicationStatus @default(ACTIVE)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   submissions Submission[]
@@ -286,6 +299,7 @@ model Submission {
   keywords      String[]
   coAuthors     Json             @default("[]")
   status        SubmissionStatus @default(DRAFT)
+  doi           String?
   submittedAt   DateTime?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
@@ -298,6 +312,7 @@ model Submission {
   manuscripts  Manuscript[]
   reviews      Review[]
   proofReviews ProofReview[]
+  copyEdits    CopyEdit[]
   assets       Asset[]
   outputs      Output[]
   decisions    EditorialDecision[]
@@ -336,15 +351,17 @@ model Review {
   recommendation    ReviewRecommendation?
   comments          String?
   confidentialNotes String?
-  dueAt             DateTime?
-  submittedAt       DateTime?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  dueAt              DateTime?
+  submittedAt        DateTime?
+  lastReminderSentAt DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   reviewer   User       @relation("ReviewerAssignment", fields: [reviewerId], references: [id])
 
   @@index([submissionId])
+  @@index([status, dueAt])
   @@map("reviews")
 }
 
@@ -381,6 +398,27 @@ model ProofReview {
 
   @@index([submissionId])
   @@map("proof_reviews")
+}
+
+model CopyEdit {
+  id           String         @id @default(uuid())
+  submissionId String
+  editorId     String
+  status       CopyEditStatus @default(ASSIGNED)
+  editedKey    String?
+  comments     String?
+  editorNotes  String?
+  assignedAt   DateTime       @default(now())
+  submittedAt  DateTime?
+  approvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  editor     User       @relation("CopyEditorAssignment", fields: [editorId], references: [id])
+
+  @@index([submissionId])
+  @@map("copy_edits")
 }
 
 model Asset {

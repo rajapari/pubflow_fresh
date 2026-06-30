@@ -33,7 +33,15 @@ export async function pandocProcessor(job: Job) {
     const ext = d.outputFormat === 'jats' ? 'xml' : d.outputFormat
     const outputKey = `outputs/${d.submissionId}/submission_${d.outputId}.${ext}`
 
-    await uploadToMinio(outputKey, out, 'application/octet-stream')
+    const MIME: Record<string, string> = {
+      pdf:    'application/pdf',
+      epub:   'application/epub+zip',
+      html:   'text/html; charset=utf-8',
+      jats:   'application/xml',
+      docx:   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bibtex: 'text/x-bibtex',
+    }
+    await uploadToMinio(outputKey, out, MIME[d.outputFormat] ?? 'application/octet-stream')
 
     const hasErrors = (result.errors ?? []).length > 0
     await prisma.output.update({

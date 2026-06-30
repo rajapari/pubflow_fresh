@@ -18,7 +18,11 @@ const TEMPLATES: Record<string, (d: Record<string,unknown>) => { subject: string
   }),
   REVIEW_INVITED: (d) => ({
     subject: `Review Invitation: ${d['title']}`,
-    html: `<h2>You have been invited to review a manuscript</h2><p><strong>${d['title']}</strong></p><p><a href="${APP}/dashboard/editorial">View →</a></p>`,
+    html: `<h2>You have been invited to review a manuscript</h2><p><strong>${d['title']}</strong></p><p><a href="${APP}/dashboard/reviews">View invitation →</a></p>`,
+  }),
+  REVIEW_SUBMITTED: (d) => ({
+    subject: `Review Completed: ${d['title']}`,
+    html: `<h2>A peer review has been submitted</h2><p><strong>${d['title']}</strong> now has a new completed review.</p><p><a href="${APP}/dashboard/submissions/${d['submissionId']}">View submission →</a></p>`,
   }),
   DECISION_MADE: (d) => ({
     subject: `Editorial Decision: ${d['decision']}`,
@@ -36,9 +40,20 @@ const TEMPLATES: Record<string, (d: Record<string,unknown>) => { subject: string
     subject: 'Your article has been published!',
     html: `<h2>Congratulations!</h2><p><strong>${d['title']}</strong> is now published.</p>`,
   }),
-  REVIEW_REMINDER: (d) => ({
-    subject: `Review Reminder — due ${d['dueDate']}`,
-    html: `<h2>Review Reminder</h2><p>Your review is due on <strong>${d['dueDate']}</strong>.</p><p><a href="${APP}/dashboard/editorial">Submit Review →</a></p>`,
+  REVIEW_REMINDER: (d) => {
+    const overdue = d['isOverdue'] === true
+    return {
+      subject: overdue
+        ? `OVERDUE: Review still pending — ${d['title']}`
+        : `Reminder: Review due ${d['dueDate']} — ${d['title']}`,
+      html: overdue
+        ? `<h2>Review Overdue</h2><p>Your review for <strong>${d['title']}</strong> was due on <strong>${d['dueDate']}</strong> and is now overdue. Please submit as soon as possible.</p><p><a href="${APP}/dashboard/reviews">Submit your review →</a></p>`
+        : `<h2>Review Due Soon</h2><p>A reminder that your review for <strong>${d['title']}</strong> is due on <strong>${d['dueDate']}</strong>.</p><p><a href="${APP}/dashboard/reviews">Submit your review →</a></p>`,
+    }
+  },
+  COPY_EDIT_ASSIGNED: (d) => ({
+    subject: `Copy Editing Assignment: ${d['title']}`,
+    html: `<h2>You have been assigned to copy edit a manuscript</h2><p><strong>${d['title']}</strong></p><p><a href="${APP}/dashboard/copyediting">View assignment →</a></p>`,
   }),
 }
 
@@ -64,12 +79,26 @@ async function resolveRecipients(template: string, data: Record<string, unknown>
 
     case 'REVIEW_INVITED': {
       if (!reviewId) return []
-      // Send to the assigned reviewer
       const review = await prisma.review.findUnique({
         where: { id: reviewId },
         include: { reviewer: true },
       })
       return review ? [review.reviewer.email] : []
+    }
+
+    case 'REVIEW_SUBMITTED': {
+      // Notify all editors in the tenant that a review is ready
+      if (!submissionId) return []
+      const submission = await prisma.submission.findUnique({ where: { id: submissionId } })
+      if (!submission) return []
+      const editors = await prisma.user.findMany({
+        where: {
+          tenantId: submission.tenantId,
+          role: { in: ['EDITOR_IN_CHIEF', 'SECTION_EDITOR'] },
+          status: 'ACTIVE',
+        },
+      })
+      return editors.map(e => e.email)
     }
 
     case 'DECISION_MADE': {
@@ -93,6 +122,10 @@ async function resolveRecipients(template: string, data: Record<string, unknown>
       })
       return submission ? [submission.author.email] : []
     }
+
+    case 'COPY_EDIT_ASSIGNED':
+      // Caller always passes to:[email] explicitly
+      return []
 
     default:
       return []

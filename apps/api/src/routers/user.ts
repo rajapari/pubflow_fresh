@@ -27,7 +27,7 @@ export const userRouter = router({
     }),
 
   list: protectedProcedure
-    .input(z.object({ role: z.enum(['SUPER_ADMIN', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'ARTWORK_EDITOR', 'TYPESETTER', 'PEER_REVIEWER', 'AUTHOR', 'READER']).optional() }))
+    .input(z.object({ role: z.enum(['SUPER_ADMIN', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'ARTWORK_EDITOR', 'TYPESETTER', 'PROOF_READER', 'PEER_REVIEWER', 'AUTHOR', 'READER']).optional() }))
     .query(async ({ ctx, input }) => {
       const where: Record<string, unknown> = { tenantId: ctx.user.tenantId, status: 'ACTIVE' }
       if (input.role) where['role'] = input.role
