@@ -65,7 +65,7 @@ export type UpdateSubmission = z.infer<typeof UpdateSubmissionSchema>
 export const ManuscriptUploadSchema = z.object({
   submissionId: z.string().uuid(),
   filename: z.string().min(1).max(255),
-  mimeType: z.string().regex(/^application\/|^text\//),
+  mimeType: z.string().regex(/^application\/|^text\/|^image\//),
   size: z.number().min(1).max(500 * 1024 * 1024),
 })
 export type ManuscriptUpload = z.infer<typeof ManuscriptUploadSchema>

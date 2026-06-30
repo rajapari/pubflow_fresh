@@ -2,29 +2,48 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, CheckCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { trpc } from '@/lib/trpc-client'
 import { FileUpload } from '@/components/ui/FileUpload'
+import { AssetUpload } from '@/components/ui/AssetUpload'
 import { Button } from '@/components/ui/Form'
+
+type AssetType = 'FIGURE' | 'TABLE' | 'SUPPLEMENTARY' | 'COVER'
+
+const ASSET_TYPES: { type: AssetType; label: string; description: string }[] = [
+  { type: 'FIGURE',        label: 'Figure',        description: 'Charts, graphs, photographs, diagrams' },
+  { type: 'TABLE',         label: 'Table',         description: 'Data tables as image or PDF' },
+  { type: 'SUPPLEMENTARY', label: 'Supplementary', description: 'Additional files, datasets, appendices' },
+  { type: 'COVER',         label: 'Cover Art',     description: 'Journal cover image or book cover' },
+]
 
 export default function UploadManuscriptPage() {
   const params = useParams()
   const router = useRouter()
   const submissionId = params.id as string
 
-  const [uploaded, setUploaded] = useState(false)
+  const [manuscriptUploaded, setManuscriptUploaded] = useState(false)
+  const [artworkOpen,        setArtworkOpen]        = useState(false)
+  const [selectedAssetType,  setSelectedAssetType]  = useState<AssetType>('FIGURE')
+  const [assetCount,         setAssetCount]         = useState(0)
 
   const submissionQ = trpc.submission.byId.useQuery({ id: submissionId })
   const submitM     = trpc.submission.submit.useMutation()
 
   const sub = submissionQ.data
 
-  const handleUploadComplete = async () => {
-    setUploaded(true)
+  const handleManuscriptComplete = async () => {
+    setManuscriptUploaded(true)
+    setArtworkOpen(true)
     await submissionQ.refetch()
-    toast.success('File saved. Click "Submit for Review" when ready.')
+    toast.success('Manuscript saved. You can optionally upload artwork below.')
+  }
+
+  const handleAssetComplete = () => {
+    setAssetCount(c => c + 1)
+    toast.success(`Artwork uploaded (${assetCount + 1} file${assetCount + 1 > 1 ? 's' : ''} added)`)
   }
 
   const handleSubmit = async () => {
@@ -47,11 +66,7 @@ export default function UploadManuscriptPage() {
     )
   }
 
-  if (!sub) {
-    return (
-      <div className="p-8 text-red-600">Submission not found.</div>
-    )
-  }
+  if (!sub) return <div className="p-8 text-red-600">Submission not found.</div>
 
   return (
     <div className="max-w-2xl mx-auto py-8 space-y-6">
@@ -63,10 +78,10 @@ export default function UploadManuscriptPage() {
         >
           <ArrowLeft size={14} /> All submissions
         </Link>
-        <h1 className="text-2xl font-bold text-gray-900">Upload Manuscript</h1>
-        <p className="text-sm text-gray-500 mt-1">Step 3 of 3 — attach your manuscript file</p>
+        <h1 className="text-2xl font-bold text-gray-900">Upload Files</h1>
+        <p className="text-sm text-gray-500 mt-1">Step 3 of 3 — attach your manuscript and optional artwork</p>
         <div className="mt-3 w-full bg-gray-200 rounded-full h-1.5">
-          <div className="bg-brand-500 h-1.5 rounded-full w-full transition-all" />
+          <div className="bg-brand-500 h-1.5 rounded-full w-full" />
         </div>
       </div>
 
@@ -88,10 +103,7 @@ export default function UploadManuscriptPage() {
             <p className="text-xs text-gray-500 mb-1">Keywords</p>
             <div className="flex flex-wrap gap-1.5">
               {(sub.keywords as string[]).map((kw, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700"
-                >
+                <span key={i} className="inline-flex items-center rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-700">
                   {kw}
                 </span>
               ))}
@@ -104,36 +116,103 @@ export default function UploadManuscriptPage() {
         </div>
       </div>
 
-      {/* Upload */}
+      {/* ── Section 1: Manuscript ── */}
       <div className="rounded-xl border border-gray-200 bg-white p-6">
-        <h2 className="text-sm font-semibold text-gray-900 mb-4">Manuscript File</h2>
+        <div className="flex items-center gap-2 mb-4">
+          <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${manuscriptUploaded ? 'bg-green-500 text-white' : 'bg-brand-500 text-white'}`}>
+            {manuscriptUploaded ? '✓' : '1'}
+          </div>
+          <h2 className="text-sm font-semibold text-gray-900">Manuscript File</h2>
+          <span className="ml-auto text-xs text-gray-400">Required</span>
+        </div>
 
-        {uploaded ? (
-          <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <CheckCircle className="h-14 w-14 text-green-500" />
+        {manuscriptUploaded ? (
+          <div className="flex flex-col items-center gap-3 py-6 text-center">
+            <CheckCircle className="h-12 w-12 text-green-500" />
             <div>
-              <p className="font-semibold text-gray-900">File uploaded successfully</p>
-              <p className="text-sm text-gray-500 mt-1">
-                Your manuscript has been saved and queued for normalisation.
-              </p>
+              <p className="font-semibold text-gray-900">Manuscript uploaded</p>
+              <p className="text-sm text-gray-500 mt-1">Queued for normalisation processing.</p>
             </div>
             <button
               type="button"
               className="text-xs text-brand-600 underline hover:no-underline"
-              onClick={() => setUploaded(false)}
+              onClick={() => setManuscriptUploaded(false)}
             >
-              Upload a different file
+              Replace with a different file
             </button>
           </div>
         ) : (
           <FileUpload
             submissionId={submissionId}
-            onUploadComplete={async () => { await handleUploadComplete() }}
+            onUploadComplete={async () => { await handleManuscriptComplete() }}
           />
         )}
       </div>
 
-      {/* Actions */}
+      {/* ── Section 2: Artwork (collapsible) ── */}
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setArtworkOpen(o => !o)}
+          className="flex w-full items-center gap-2 px-6 py-4 hover:bg-gray-50 transition-colors text-left"
+        >
+          <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${assetCount > 0 ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
+            {assetCount > 0 ? assetCount : '2'}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900">Artwork &amp; Supplementary Files</p>
+            <p className="text-xs text-gray-400">
+              {assetCount > 0 ? `${assetCount} file${assetCount > 1 ? 's' : ''} added` : 'JPEG · PNG · TIFF · EPS · SVG · PDF — optional'}
+            </p>
+          </div>
+          <span className="text-xs text-gray-400 mr-1">Optional</span>
+          {artworkOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        </button>
+
+        {artworkOpen && (
+          <div className="px-6 pb-6 space-y-4 border-t border-gray-100 pt-4">
+            {/* Asset type selector */}
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-2">Asset type</p>
+              <div className="grid grid-cols-2 gap-2">
+                {ASSET_TYPES.map(({ type, label, description }) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setSelectedAssetType(type)}
+                    className={[
+                      'rounded-lg border-2 px-3 py-2.5 text-left text-sm transition-colors',
+                      selectedAssetType === type
+                        ? 'border-brand-500 bg-brand-50 text-brand-800'
+                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50',
+                    ].join(' ')}
+                  >
+                    <span className="font-medium">{label}</span>
+                    <p className="text-xs text-gray-500 mt-0.5">{description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <AssetUpload
+              submissionId={submissionId}
+              assetType={selectedAssetType}
+              onUploadComplete={() => handleAssetComplete()}
+            />
+
+            {assetCount > 0 && (
+              <p className="text-xs text-gray-500 text-center">
+                {assetCount} artwork file{assetCount > 1 ? 's' : ''} added.{' '}
+                <Link href={`/dashboard/submissions/${submissionId}/assets`} className="text-brand-600 underline hover:no-underline">
+                  Manage all artwork →
+                </Link>
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Actions ── */}
       <div className="flex items-center justify-between">
         <Button
           variant="secondary"
@@ -143,7 +222,7 @@ export default function UploadManuscriptPage() {
         </Button>
 
         <Button
-          disabled={!uploaded || submitM.isPending}
+          disabled={!manuscriptUploaded || submitM.isPending}
           loading={submitM.isPending}
           onClick={handleSubmit}
         >
@@ -152,7 +231,7 @@ export default function UploadManuscriptPage() {
       </div>
 
       <p className="text-center text-xs text-gray-400">
-        You can submit for review later from the submission detail page once a file is uploaded.
+        Artwork can also be uploaded later from the submission detail page. A manuscript file is required before submitting.
       </p>
     </div>
   )

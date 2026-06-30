@@ -8,7 +8,7 @@ import { MinioStorage } from '../plugins/minio.js'
 import { QUEUES } from '@pubflow/types'
 import { createHmac } from 'crypto'
 
-type ManuscriptFormat = 'DOCX' | 'LATEX' | 'MARKDOWN' | 'ODT' | 'RTF'
+type ManuscriptFormat = 'DOCX' | 'LATEX' | 'MARKDOWN' | 'ODT' | 'RTF' | 'PDF' | 'ZIP'
 
 export const submissionRouter = router({
 
@@ -177,17 +177,30 @@ export const submissionRouter = router({
       const uploadUrl = await minio.getPresignedUrl(key)
 
       const fmtMap: Record<string, string> = {
+        // Word / Office
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
-        'application/msword':                       'DOCX',
-        'application/vnd.oasis.opendocument.text':  'ODT',
-        'application/rtf':                          'RTF',
-        'text/rtf':                                 'RTF',
-        'application/x-tex':                        'LATEX',
-        'application/x-latex':                      'LATEX',
-        'text/x-tex':                               'LATEX',
-        'text/markdown':                            'MARKDOWN',
-        'text/x-markdown':                          'MARKDOWN',
-        'text/plain':                               'MARKDOWN',
+        'application/msword':                                'DOCX',
+        // OpenDocument
+        'application/vnd.oasis.opendocument.text':           'ODT',
+        // Rich Text
+        'application/rtf':                                   'RTF',
+        'text/rtf':                                          'RTF',
+        // LaTeX
+        'application/x-tex':                                 'LATEX',
+        'application/x-latex':                               'LATEX',
+        'text/x-tex':                                        'LATEX',
+        // Markdown / plain text
+        'text/markdown':                                     'MARKDOWN',
+        'text/x-markdown':                                   'MARKDOWN',
+        'text/plain':                                        'MARKDOWN',
+        // PDF
+        'application/pdf':                                   'PDF',
+        // Archive / LaTeX bundle
+        'application/zip':                                   'ZIP',
+        'application/x-zip-compressed':                      'ZIP',
+        'application/x-zip':                                 'ZIP',
+        'application/x-7z-compressed':                       'ZIP',
+        'application/x-rar-compressed':                      'ZIP',
       }
 
       await prisma.manuscript.updateMany({

@@ -15,20 +15,32 @@ interface FileUploadProps {
 
 // All MIME types accepted as manuscript input for e-publishing
 const ACCEPTED_MIME: Record<string, string> = {
+  // Word / Office
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word (.docx)',
-  'application/msword': 'Word (.doc)',
-  'application/vnd.oasis.opendocument.text': 'OpenDocument (.odt)',
-  'application/rtf': 'Rich Text (.rtf)',
-  'text/rtf': 'Rich Text (.rtf)',
-  'application/x-tex': 'LaTeX (.tex)',
-  'application/x-latex': 'LaTeX (.tex)',
-  'text/x-tex': 'LaTeX (.tex)',
-  'text/markdown': 'Markdown (.md)',
-  'text/x-markdown': 'Markdown (.md)',
-  'text/plain': 'Plain Text (.txt)',
+  'application/msword':                              'Word (.doc)',
+  // OpenDocument
+  'application/vnd.oasis.opendocument.text':         'OpenDocument (.odt)',
+  // Rich Text
+  'application/rtf':                                 'Rich Text (.rtf)',
+  'text/rtf':                                        'Rich Text (.rtf)',
+  // LaTeX
+  'application/x-tex':                               'LaTeX (.tex)',
+  'application/x-latex':                             'LaTeX (.tex)',
+  'text/x-tex':                                      'LaTeX (.tex)',
+  // Markdown / plain text
+  'text/markdown':                                   'Markdown (.md)',
+  'text/x-markdown':                                 'Markdown (.md)',
+  'text/plain':                                      'Plain Text (.txt)',
+  // PDF
+  'application/pdf':                                 'PDF (.pdf)',
+  // Archives (LaTeX bundles, supplementary packages)
+  'application/zip':                                 'ZIP archive (.zip)',
+  'application/x-zip-compressed':                    'ZIP archive (.zip)',
+  'application/x-zip':                               'ZIP archive (.zip)',
+  'application/x-7z-compressed':                     '7-Zip archive (.7z)',
 }
 
-const ACCEPT_EXTENSIONS = '.docx,.doc,.odt,.rtf,.tex,.latex,.ltx,.md,.markdown,.txt'
+const ACCEPT_EXTENSIONS = '.docx,.doc,.odt,.rtf,.tex,.latex,.ltx,.md,.markdown,.txt,.pdf,.zip,.7z'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -48,9 +60,12 @@ function detectMime(file: File): string {
     tex:  'application/x-tex',
     latex:'application/x-tex',
     ltx:  'application/x-tex',
-    md:   'text/markdown',
+    md:       'text/markdown',
     markdown: 'text/markdown',
-    txt:  'text/plain',
+    txt:      'text/plain',
+    pdf:      'application/pdf',
+    zip:      'application/zip',
+    '7z':     'application/x-7z-compressed',
   }
   return byExt[ext] ?? file.type
 }
@@ -201,7 +216,7 @@ export function FileUpload({
                 {dragOver ? 'Drop to upload' : 'Click to upload or drag & drop'}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                DOCX · ODT · RTF · LaTeX · Markdown · plain text &mdash; up to {formatBytes(maxSize)}
+                DOCX · ODT · RTF · LaTeX · PDF · ZIP/7Z · Markdown · plain text &mdash; up to {formatBytes(maxSize)}
               </p>
             </div>
           </div>
@@ -215,12 +230,14 @@ export function FileUpload({
         </summary>
         <ul className="mt-2 ml-4 space-y-0.5 list-disc">
           {Object.entries({
-            'Word': '.docx, .doc',
+            'Word':         '.docx, .doc',
             'OpenDocument': '.odt',
-            'Rich Text': '.rtf',
-            'LaTeX': '.tex, .latex, .ltx',
-            'Markdown': '.md, .markdown',
-            'Plain text': '.txt',
+            'Rich Text':    '.rtf',
+            'LaTeX':        '.tex, .latex, .ltx',
+            'Markdown':     '.md, .markdown',
+            'Plain text':   '.txt',
+            'PDF':          '.pdf',
+            'Archive':      '.zip, .7z (e.g. LaTeX bundle with assets)',
           }).map(([fmt, exts]) => (
             <li key={fmt}><span className="font-medium">{fmt}</span> — {exts}</li>
           ))}

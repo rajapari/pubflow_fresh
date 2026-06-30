@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Button } from './Form'
 import { toast } from 'sonner'
-import { Upload, X, CheckCircle, AlertCircle, Loader } from 'lucide-react'
+import { Upload, X, CheckCircle, AlertCircle, Loader, Image as ImageIcon } from 'lucide-react'
 import { trpc } from '@/lib/trpc-client'
 
 interface AssetUploadProps {
@@ -12,118 +12,157 @@ interface AssetUploadProps {
   onUploadComplete?: (assetId: string) => void
 }
 
-export function AssetUpload({ submissionId, assetType, onUploadComplete }: AssetUploadProps) {
-  const [file, setFile] = useState<File | null>(null)
-  const [progress, setProgress] = useState(0)
-  const [isUploading, setIsUploading] = useState(false)
-  const [figureLabel, setFigureLabel] = useState('')
-  const [altText, setAltText] = useState('')
-  const [caption, setCaption] = useState('')
-  const [validationStatus, setValidationStatus] = useState<'idle' | 'validating' | 'success' | 'warning'>('idle')
-  const [validationMessage, setValidationMessage] = useState('')
+// MIME types accepted for artwork / asset files
+const ASSET_MIME: Record<string, string> = {
+  'image/jpeg':            'JPEG (.jpg)',
+  'image/png':             'PNG (.png)',
+  'image/tiff':            'TIFF (.tif / .tiff)',
+  'image/gif':             'GIF (.gif)',
+  'image/webp':            'WebP (.webp)',
+  'image/svg+xml':         'SVG (.svg)',
+  'image/x-eps':           'EPS (.eps)',
+  'application/postscript':'EPS / PostScript (.eps, .ps)',
+  'application/pdf':       'PDF (.pdf)',
+}
 
-  const getUrlMutation = trpc.asset.getUploadUrl.useMutation()
+const ASSET_ACCEPT = '.jpg,.jpeg,.png,.tif,.tiff,.gif,.webp,.svg,.eps,.ps,.pdf'
+
+function detectAssetMime(file: File): string {
+  if (file.type && ASSET_MIME[file.type]) return file.type
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const byExt: Record<string, string> = {
+    jpg:  'image/jpeg',
+    jpeg: 'image/jpeg',
+    png:  'image/png',
+    tif:  'image/tiff',
+    tiff: 'image/tiff',
+    gif:  'image/gif',
+    webp: 'image/webp',
+    svg:  'image/svg+xml',
+    eps:  'application/postscript',
+    ps:   'application/postscript',
+    pdf:  'application/pdf',
+  }
+  return byExt[ext] ?? file.type
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+export function AssetUpload({ submissionId, assetType, onUploadComplete }: AssetUploadProps) {
+  const [file,             setFile]             = useState<File | null>(null)
+  const [progress,         setProgress]         = useState(0)
+  const [isUploading,      setIsUploading]      = useState(false)
+  const [dragOver,         setDragOver]         = useState(false)
+  const [figureLabel,      setFigureLabel]      = useState('')
+  const [altText,          setAltText]          = useState('')
+  const [caption,          setCaption]          = useState('')
+  const [validationStatus, setValidationStatus] = useState<'idle' | 'validating' | 'success' | 'warning'>('idle')
+  const [validationMessage,setValidationMessage]= useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const getUrlMutation  = trpc.asset.getUploadUrl.useMutation()
   const confirmMutation = trpc.asset.confirmUpload.useMutation()
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0]
-    if (!selectedFile) return
-
-    // Validate file type
-    const validTypes = ['image/jpeg', 'image/png', 'image/tiff', 'application/pdf']
-    if (!validTypes.includes(selectedFile.type)) {
-      toast.error('Invalid file type. Allowed: JPEG, PNG, TIFF, PDF')
+  const processFile = useCallback((selected: File) => {
+    const mimeType = detectAssetMime(selected)
+    if (!ASSET_MIME[mimeType]) {
+      toast.error(`"${selected.name}" is not a supported image format. Accepted: JPEG, PNG, TIFF, EPS, SVG, PDF.`)
       return
     }
-
-    // Validate file size (max 50MB)
-    if (selectedFile.size > 50 * 1024 * 1024) {
-      toast.error('File too large. Maximum 50MB allowed')
+    if (selected.size > 200 * 1024 * 1024) {
+      toast.error(`File is too large (${formatBytes(selected.size)}). Maximum for artwork is 200 MB.`)
       return
     }
+    setFile(selected)
+    setValidationStatus('idle')
+    setValidationMessage('')
+  }, [])
 
-    setFile(selectedFile)
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.currentTarget.files?.[0]
+    if (f) processFile(f)
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (isUploading) return
+    const f = e.dataTransfer.files?.[0]
+    if (f) processFile(f)
   }
 
   const handleUpload = async () => {
-    if (!file) {
-      toast.error('Please select a file')
-      return
-    }
+    if (!file) { toast.error('Please select a file first'); return }
 
     setIsUploading(true)
     setValidationStatus('validating')
     setProgress(0)
 
+    const mimeType = detectAssetMime(file)
+
     try {
-      // Step 1: Get presigned upload URL via tRPC
+      // Step 1: Get presigned PUT URL
       const { url: presignedUrl, minioKey } = await getUrlMutation.mutateAsync({
         submissionId,
         filename: file.name,
-        mimeType: file.type,
+        mimeType,
         assetType,
       })
 
-      // Step 2: Upload file to MinIO via presigned URL
-      const xhr = new XMLHttpRequest()
+      setProgress(20)
 
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          setProgress(Math.round((e.loaded / e.total) * 80))
-        }
-      })
-
-      await new Promise((resolve, reject) => {
-        xhr.onload = () => {
-          if (xhr.status === 200) resolve(null)
-          else reject(new Error(`Upload failed: ${xhr.status}`))
-        }
-        xhr.onerror = () => reject(new Error('Network error'))
-        xhr.open('PUT', presignedUrl)
-        xhr.setRequestHeader('Content-Type', file.type)
+      // Step 2: Upload to MinIO
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) setProgress(20 + (e.loaded / e.total) * 65)
+        })
+        xhr.addEventListener('load', () => xhr.status === 200 ? resolve() : reject(new Error(`HTTP ${xhr.status}`)))
+        xhr.addEventListener('error', () => reject(new Error('Network error')))
+        xhr.open('PUT', presignedUrl, true)
+        xhr.setRequestHeader('Content-Type', mimeType)
         xhr.send(file)
       })
 
-      setProgress(85)
+      setProgress(88)
 
-      // Step 3: Confirm upload and queue processing via tRPC
+      // Step 3: Confirm + queue image processing job
       const assetId = crypto.randomUUID()
       await confirmMutation.mutateAsync({
         submissionId,
         assetId,
         minioKey,
         filename: file.name,
-        mimeType: file.type,
+        mimeType,
         fileSizeBytes: file.size,
         assetType,
         figureLabel: figureLabel || undefined,
-        altText: altText || undefined,
-        caption: caption || undefined,
+        altText:     altText     || undefined,
+        caption:     caption     || undefined,
       })
 
+      setProgress(100)
       setValidationStatus('success')
-      setValidationMessage('Upload successful. Processing started.')
-      toast.success('Asset uploaded and queued for processing')
+      setValidationMessage('Uploaded — image processing queued.')
+      toast.success('Artwork uploaded successfully!')
 
-      // Reset form
       setFile(null)
       setFigureLabel('')
       setAltText('')
       setCaption('')
-      setProgress(0)
+      if (fileInputRef.current) fileInputRef.current.value = ''
 
       onUploadComplete?.(assetId)
-
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        setValidationStatus('idle')
-        setValidationMessage('')
-      }, 3000)
+      setTimeout(() => { setValidationStatus('idle'); setProgress(0) }, 3000)
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Upload failed'
+      const msg = err instanceof Error ? err.message : 'Upload failed'
       setValidationStatus('warning')
-      setValidationMessage(errorMsg)
-      toast.error(errorMsg)
+      setValidationMessage(msg)
+      toast.error(msg)
+      setProgress(0)
     } finally {
       setIsUploading(false)
     }
@@ -131,130 +170,140 @@ export function AssetUpload({ submissionId, assetType, onUploadComplete }: Asset
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border-2 border-dashed border-gray-300 p-6">
-        <div className="flex flex-col items-center gap-2">
-          <Upload className="h-8 w-8 text-gray-400" />
-          <p className="text-sm font-medium text-gray-700">
-            {file ? file.name : 'Click to select or drag and drop'}
-          </p>
-          <p className="text-xs text-gray-500">JPEG, PNG, TIFF, or PDF up to 50MB</p>
-        </div>
+      {/* Drop zone */}
+      <div
+        onClick={() => !isUploading && fileInputRef.current?.click()}
+        onDrop={handleDrop}
+        onDragOver={(e) => { e.preventDefault(); if (!isUploading) setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        className={[
+          'relative rounded-xl border-2 border-dashed p-8 text-center transition-all cursor-pointer select-none',
+          isUploading
+            ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
+            : dragOver
+              ? 'border-brand-500 bg-brand-50 scale-[1.01]'
+              : file
+                ? 'border-green-400 bg-green-50'
+                : 'border-gray-300 bg-gray-50/60 hover:bg-gray-100 hover:border-gray-400',
+        ].join(' ')}
+      >
         <input
+          ref={fileInputRef}
           type="file"
-          onChange={handleFileSelect}
+          onChange={handleFileInput}
           disabled={isUploading}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-          accept=".jpg,.jpeg,.png,.tiff,.pdf"
+          accept={ASSET_ACCEPT}
+          className="hidden"
+          aria-label="Upload artwork"
         />
+
+        {isUploading ? (
+          <div className="space-y-2">
+            <Loader className="mx-auto h-8 w-8 animate-spin text-brand-500" />
+            <p className="text-sm font-medium text-gray-700">Uploading {file?.name}…</p>
+            <div className="mx-auto max-w-xs">
+              <div className="w-full bg-gray-200 rounded-full h-1.5">
+                <div className="bg-brand-500 h-1.5 rounded-full transition-all" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">{Math.round(progress)}%</p>
+            </div>
+          </div>
+        ) : file ? (
+          <div className="flex items-center justify-center gap-3">
+            <CheckCircle className="h-6 w-6 text-green-500 shrink-0" />
+            <div className="text-left">
+              <p className="text-sm font-medium text-gray-900 truncate max-w-[260px]">{file.name}</p>
+              <p className="text-xs text-gray-500">{formatBytes(file.size)}</p>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
+              className="ml-2 rounded-full p-1 hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <ImageIcon className={`mx-auto h-10 w-10 transition-colors ${dragOver ? 'text-brand-500' : 'text-gray-400'}`} />
+            <div>
+              <p className="text-sm font-semibold text-gray-700">
+                {dragOver ? 'Drop image to upload' : 'Click to browse or drag & drop'}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                JPEG · PNG · TIFF · EPS · SVG · PDF &mdash; up to 200 MB
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
-      {file && (
+      {/* Metadata fields — visible once a file is chosen */}
+      {file && !isUploading && (
         <div className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Figure Label
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Figure Label <span className="text-gray-400">(optional)</span>
             </label>
             <input
               type="text"
               value={figureLabel}
               onChange={(e) => setFigureLabel(e.target.value)}
-              placeholder="e.g., Figure 1: Experimental setup"
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={isUploading}
+              placeholder="e.g. Figure 1 — Experimental setup"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Alt Text (for accessibility)
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Alt Text <span className="text-gray-400">(for accessibility)</span>
             </label>
             <input
               type="text"
               value={altText}
               onChange={(e) => setAltText(e.target.value)}
               placeholder="Describe the image for screen readers"
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={isUploading}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Caption
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Caption <span className="text-gray-400">(optional)</span>
             </label>
             <textarea
               value={caption}
               onChange={(e) => setCaption(e.target.value)}
-              placeholder="Optional: Detailed caption for the figure"
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              rows={3}
-              disabled={isUploading}
+              placeholder="Detailed caption that will appear below the figure"
+              rows={2}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
           </div>
 
-          {isUploading && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Uploading...</span>
-                <span>{progress}%</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-gray-200">
-                <div
-                  className="h-full rounded-full bg-blue-500 transition-all"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {validationStatus !== 'idle' && (
-            <div
-              className={`flex gap-2 rounded-lg px-4 py-3 text-sm ${
-                validationStatus === 'success'
-                  ? 'bg-green-50 text-green-700'
-                  : validationStatus === 'warning'
-                    ? 'bg-yellow-50 text-yellow-700'
-                    : 'bg-blue-50 text-blue-700'
-              }`}
-            >
-              {validationStatus === 'success' ? (
-                <CheckCircle className="h-5 w-5 flex-shrink-0" />
-              ) : (
-                <AlertCircle className="h-5 w-5 flex-shrink-0" />
-              )}
-              <span>{validationMessage}</span>
-            </div>
-          )}
-
           <div className="flex gap-2">
-            <Button
-              onClick={handleUpload}
-              disabled={isUploading}
-              className="flex-1"
-            >
-              {isUploading ? (
-                <>
-                  <Loader className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading
-                </>
-              ) : (
-                'Upload Asset'
-              )}
+            <Button onClick={handleUpload} className="flex-1">
+              Upload Artwork
             </Button>
             <Button
-              onClick={() => {
-                setFile(null)
-                setFigureLabel('')
-                setAltText('')
-                setCaption('')
-                setValidationStatus('idle')
-              }}
-              variant="outline"
-              disabled={isUploading}
+              variant="secondary"
+              onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = '' }}
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Validation feedback */}
+      {validationStatus !== 'idle' && (
+        <div className={[
+          'flex gap-2 rounded-lg px-4 py-3 text-sm',
+          validationStatus === 'success' ? 'bg-green-50 text-green-700'
+          : validationStatus === 'warning' ? 'bg-red-50 text-red-700'
+          : 'bg-blue-50 text-blue-700',
+        ].join(' ')}>
+          {validationStatus === 'success'
+            ? <CheckCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            : <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />}
+          <span>{validationMessage}</span>
         </div>
       )}
     </div>

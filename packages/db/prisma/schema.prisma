@@ -79,6 +79,8 @@ enum ManuscriptFormat {
   MARKDOWN
   ODT
   RTF
+  PDF
+  ZIP
 }
 
 enum ReviewStatus {
