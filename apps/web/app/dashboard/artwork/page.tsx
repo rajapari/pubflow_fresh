@@ -84,7 +84,7 @@ export default function ArtworkPage() {
         </div>
       ) : !assetsQ.data?.assets.length ? (
         <div className="flex flex-col items-center rounded-xl border border-dashed border-gray-300 py-16">
-          <Image size={40} className="text-gray-300 mb-3" />
+          <Image size={40} className="text-gray-300 mb-3" aria-hidden="true" />
           <p className="text-sm text-gray-500">No assets found for this filter</p>
         </div>
       ) : (
@@ -95,7 +95,7 @@ export default function ArtworkPage() {
                 <div className="flex items-start gap-4">
                   {/* Icon */}
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-100">
-                    <Image size={20} className="text-gray-400" />
+                    <Image size={20} className="text-gray-400" aria-hidden="true" />
                   </div>
 
                   {/* Details */}

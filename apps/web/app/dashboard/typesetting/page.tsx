@@ -134,7 +134,7 @@ export default function TypesettingPage() {
                         <RefreshCw size={14} className="animate-spin" /> Loading outputs…
                       </div>
                     ) : !outputsQ.data?.length ? (
-                      <p className="text-sm text-gray-400">No outputs generated yet. Click "Generate Output" to start.</p>
+                      <p className="text-sm text-gray-400">No outputs generated yet. Click &ldquo;Generate Output&rdquo; to start.</p>
                     ) : (
                       <div className="space-y-2">
                         {(outputsQ.data as any[]).map((out: any) => (

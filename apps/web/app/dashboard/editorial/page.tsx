@@ -35,7 +35,9 @@ export default function EditorialPage() {
   const [decisionModal, setDecisionModal] = useState<DecisionModal | null>(null)
 
   const tab = TABS.find(t => t.key === activeTab)!
-  const statusFilter = tab.statuses.length === 1 ? tab.statuses[0] as any : undefined
+  // TABS use `as const` so statuses are narrow tuples; cast for runtime comparisons
+  const statuses = tab.statuses as unknown as string[]
+  const statusFilter = statuses.length === 1 ? (statuses[0] as any) : undefined
 
   const submissionsQ = trpc.submission.list.useQuery({
     status: statusFilter,
@@ -45,7 +47,7 @@ export default function EditorialPage() {
 
   // Filter client-side for multi-status tabs
   const submissions = (submissionsQ.data?.submissions ?? []).filter((s: any) =>
-    tab.statuses.length === 0 || tab.statuses.includes(s.status)
+    statuses.length === 0 || statuses.includes(s.status)
   )
 
   const reviewersQ = trpc.user.list.useQuery({ role: 'PEER_REVIEWER' }, { enabled: !!assignModal })
