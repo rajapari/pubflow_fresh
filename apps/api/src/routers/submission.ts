@@ -178,9 +178,16 @@ export const submissionRouter = router({
 
       const fmtMap: Record<string, string> = {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
-        'application/x-tex':   'LATEX',
-        'text/markdown':       'MARKDOWN',
-        'application/vnd.oasis.opendocument.text': 'ODT',
+        'application/msword':                       'DOCX',
+        'application/vnd.oasis.opendocument.text':  'ODT',
+        'application/rtf':                          'RTF',
+        'text/rtf':                                 'RTF',
+        'application/x-tex':                        'LATEX',
+        'application/x-latex':                      'LATEX',
+        'text/x-tex':                               'LATEX',
+        'text/markdown':                            'MARKDOWN',
+        'text/x-markdown':                          'MARKDOWN',
+        'text/plain':                               'MARKDOWN',
       }
 
       await prisma.manuscript.updateMany({

@@ -1,170 +1,235 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import { Button } from './Form'
-import { Upload, FileText, AlertCircle } from 'lucide-react'
+import { Upload, FileText, AlertCircle, CheckCircle, X } from 'lucide-react'
 import { trpc } from '@/lib/trpc-client'
 
 interface FileUploadProps {
   onUploadComplete: (file: File, minioKey: string, manuscriptId: string) => Promise<void>
   submissionId: string
-  acceptedFormats?: string[]
   maxSize?: number
   disabled?: boolean
 }
 
-const ACCEPTED_FORMATS = {
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
-  'application/x-tex': 'LaTeX',
-  'text/markdown': 'Markdown',
-  'text/plain': 'Text',
-  'application/vnd.oasis.opendocument.text': 'ODT',
+// All MIME types accepted as manuscript input for e-publishing
+const ACCEPTED_MIME: Record<string, string> = {
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word (.docx)',
+  'application/msword': 'Word (.doc)',
+  'application/vnd.oasis.opendocument.text': 'OpenDocument (.odt)',
+  'application/rtf': 'Rich Text (.rtf)',
+  'text/rtf': 'Rich Text (.rtf)',
+  'application/x-tex': 'LaTeX (.tex)',
+  'application/x-latex': 'LaTeX (.tex)',
+  'text/x-tex': 'LaTeX (.tex)',
+  'text/markdown': 'Markdown (.md)',
+  'text/x-markdown': 'Markdown (.md)',
+  'text/plain': 'Plain Text (.txt)',
+}
+
+const ACCEPT_EXTENSIONS = '.docx,.doc,.odt,.rtf,.tex,.latex,.ltx,.md,.markdown,.txt'
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function detectMime(file: File): string {
+  // Browser may not set MIME for .tex, .rtf, .md — fall back by extension
+  if (file.type && ACCEPTED_MIME[file.type]) return file.type
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const byExt: Record<string, string> = {
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc:  'application/msword',
+    odt:  'application/vnd.oasis.opendocument.text',
+    rtf:  'application/rtf',
+    tex:  'application/x-tex',
+    latex:'application/x-tex',
+    ltx:  'application/x-tex',
+    md:   'text/markdown',
+    markdown: 'text/markdown',
+    txt:  'text/plain',
+  }
+  return byExt[ext] ?? file.type
 }
 
 export function FileUpload({
   onUploadComplete,
   submissionId,
-  maxSize = 500 * 1024 * 1024, // 500MB
+  maxSize = 500 * 1024 * 1024,
   disabled = false,
 }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [progress,    setProgress]    = useState(0)
+  const [dragOver,    setDragOver]    = useState(false)
+  const [selected,    setSelected]    = useState<File | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const getUrlMutation = trpc.submission.getUploadUrl.useMutation()
+  const getUrlMutation  = trpc.submission.getUploadUrl.useMutation()
   const confirmMutation = trpc.submission.confirmUpload.useMutation()
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.currentTarget.files?.[0]
-    if (!file) return
+  const processFile = useCallback(async (file: File) => {
+    const mimeType = detectMime(file)
 
-    // Validate file
-    if (!ACCEPTED_FORMATS[file.type as keyof typeof ACCEPTED_FORMATS]) {
-      toast.error(`File type not supported. Accepted: ${Object.values(ACCEPTED_FORMATS).join(', ')}`)
+    if (!ACCEPTED_MIME[mimeType]) {
+      toast.error(`"${file.name}" is not a supported format. Accepted: DOCX, ODT, RTF, LaTeX, Markdown, plain text.`)
       return
     }
-
     if (file.size > maxSize) {
-      toast.error(`File too large. Max size: ${(maxSize / 1024 / 1024).toFixed(0)}MB`)
+      toast.error(`File is too large (${formatBytes(file.size)}). Maximum is ${formatBytes(maxSize)}.`)
       return
     }
+
+    setSelected(file)
+    setIsUploading(true)
+    setProgress(0)
 
     try {
-      setIsUploading(true)
-      setProgress(0)
-
-      // Step 1: Get presigned URL from API
+      // Step 1: Get presigned PUT URL from API
       const { uploadUrl, key, manuscriptId } = await getUrlMutation.mutateAsync({
         submissionId,
         filename: file.name,
-        mimeType: file.type,
+        mimeType,
         size: file.size,
       })
 
-      setProgress(30)
+      setProgress(20)
 
-      // Step 2: Upload directly to MinIO using presigned URL
-      const xhr = new XMLHttpRequest()
-      
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const percentComplete = (e.loaded / e.total) * 70
-          setProgress(30 + percentComplete)
-        }
-      })
-
+      // Step 2: Upload file directly to MinIO via presigned URL
       await new Promise<void>((resolve, reject) => {
-        xhr.addEventListener('load', () => {
-          if (xhr.status === 200) {
-            setProgress(95)
-            resolve()
-          } else {
-            reject(new Error(`Upload failed with status ${xhr.status}`))
-          }
+        const xhr = new XMLHttpRequest()
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) setProgress(20 + (e.loaded / e.total) * 70)
         })
-        xhr.addEventListener('error', () => reject(new Error('Upload failed')))
-
+        xhr.addEventListener('load', () => {
+          xhr.status === 200 ? resolve() : reject(new Error(`Upload failed (HTTP ${xhr.status})`))
+        })
+        xhr.addEventListener('error', () => reject(new Error('Network error during upload')))
         xhr.open('PUT', uploadUrl, true)
-        xhr.setRequestHeader('Content-Type', file.type)
+        xhr.setRequestHeader('Content-Type', mimeType)
         xhr.send(file)
       })
 
-      // Step 3: Confirm upload with API
-      await confirmMutation.mutateAsync({
-        submissionId,
-        manuscriptId,
-        minioKey: key,
-      })
+      setProgress(92)
+
+      // Step 3: Confirm upload and queue normalisation job
+      await confirmMutation.mutateAsync({ submissionId, manuscriptId, minioKey: key })
 
       setProgress(100)
       toast.success('Manuscript uploaded successfully!')
-      
-      // Call completion callback
       await onUploadComplete(file, key, manuscriptId)
 
-      // Reset
       if (fileInputRef.current) fileInputRef.current.value = ''
       setProgress(0)
+      setSelected(null)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Upload failed'
-      toast.error(message)
+      toast.error(err instanceof Error ? err.message : 'Upload failed')
       setProgress(0)
+      setSelected(null)
     } finally {
       setIsUploading(false)
     }
+  }, [submissionId, maxSize, getUrlMutation, confirmMutation, onUploadComplete])
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.currentTarget.files?.[0]
+    if (file) processFile(file)
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (isUploading || disabled) return
+    const file = e.dataTransfer.files?.[0]
+    if (file) processFile(file)
+  }
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    if (!isUploading && !disabled) setDragOver(true)
   }
 
   return (
     <div className="space-y-4">
       <div
         onClick={() => !isUploading && !disabled && fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={() => setDragOver(false)}
+        className={[
+          'relative border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer select-none',
           isUploading || disabled
             ? 'bg-gray-50 border-gray-200 cursor-not-allowed'
-            : 'border-blue-300 bg-blue-50 hover:bg-blue-100'
-        }`}
+            : dragOver
+              ? 'border-blue-500 bg-blue-50 scale-[1.01]'
+              : 'border-blue-300 bg-blue-50/60 hover:bg-blue-100 hover:border-blue-400',
+        ].join(' ')}
       >
         <input
           ref={fileInputRef}
           type="file"
           onChange={handleFileSelect}
           disabled={isUploading || disabled}
-          accept=".docx,.tex,.md,.txt,.odt"
+          accept={ACCEPT_EXTENSIONS}
           className="hidden"
           aria-label="Upload manuscript"
         />
 
-        {!isUploading ? (
-          <div className="space-y-2">
-            <Upload className="mx-auto h-10 w-10 text-blue-600" />
-            <div className="text-sm text-gray-700">
-              <p className="font-medium">Click to upload or drag and drop</p>
-              <p className="text-xs text-gray-600">DOCX, LaTeX, Markdown, ODT (max 500MB)</p>
+        {isUploading ? (
+          <div className="space-y-3">
+            <FileText className="mx-auto h-10 w-10 text-blue-500 animate-pulse" />
+            <p className="text-sm font-medium text-gray-700">
+              Uploading {selected?.name}…
+            </p>
+            <div className="mx-auto max-w-xs">
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">{Math.round(progress)}%</p>
             </div>
           </div>
         ) : (
           <div className="space-y-2">
-            <FileText className="mx-auto h-10 w-10 text-blue-600 animate-pulse" />
+            <Upload className={`mx-auto h-10 w-10 transition-colors ${dragOver ? 'text-blue-600' : 'text-blue-400'}`} />
             <div>
-              <p className="text-sm font-medium text-gray-700">Uploading...</p>
-              <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-600 mt-1">{Math.round(progress)}%</p>
+              <p className="text-sm font-semibold text-gray-800">
+                {dragOver ? 'Drop to upload' : 'Click to upload or drag & drop'}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                DOCX · ODT · RTF · LaTeX · Markdown · plain text &mdash; up to {formatBytes(maxSize)}
+              </p>
             </div>
           </div>
         )}
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded p-3 flex gap-2 text-sm text-blue-800">
-        <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-        <p>
-          Your manuscript will be normalized to a standard format for compatibility across the review process.
-        </p>
+      {/* Format reference */}
+      <details className="text-xs text-gray-500">
+        <summary className="cursor-pointer hover:text-gray-700 select-none">
+          Supported formats
+        </summary>
+        <ul className="mt-2 ml-4 space-y-0.5 list-disc">
+          {Object.entries({
+            'Word': '.docx, .doc',
+            'OpenDocument': '.odt',
+            'Rich Text': '.rtf',
+            'LaTeX': '.tex, .latex, .ltx',
+            'Markdown': '.md, .markdown',
+            'Plain text': '.txt',
+          }).map(([fmt, exts]) => (
+            <li key={fmt}><span className="font-medium">{fmt}</span> — {exts}</li>
+          ))}
+        </ul>
+      </details>
+
+      <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5 text-xs text-blue-800">
+        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+        <span>Your manuscript will be normalised to a standard format to ensure compatibility across the review pipeline.</span>
       </div>
     </div>
   )
