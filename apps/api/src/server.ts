@@ -9,8 +9,11 @@ import { minioPlugin } from './plugins/minio.js'
 import { redisPlugin } from './plugins/redis.js'
 import { bullPlugin } from './plugins/bull.js'
 import { trpcPlugin } from './plugins/trpc.js'
-import { healthRoutes } from './routes/health.js'
-import { wopiRoutes } from './routes/wopi.js'
+import { healthRoutes }   from './routes/health.js'
+import { wopiRoutes }    from './routes/wopi.js'
+import { webhookRoutes } from './routes/webhooks.js'
+import { oaiRoutes }     from './routes/oai.js'
+import { rssRoutes }     from './routes/rss.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const HOST = process.env.HOST ?? '0.0.0.0'
@@ -54,9 +57,12 @@ export async function buildServer() {
   await app.register(authPlugin)
 
   // Routes
-  await app.register(healthRoutes, { prefix: '/health' })
-  await app.register(wopiRoutes, { prefix: '/wopi' })
-  await app.register(trpcPlugin, { prefix: '/trpc' })
+  await app.register(healthRoutes,  { prefix: '/health' })
+  await app.register(wopiRoutes,    { prefix: '/wopi' })
+  await app.register(webhookRoutes, { prefix: '/webhooks' })
+  await app.register(oaiRoutes,     { prefix: '/oai' })
+  await app.register(rssRoutes,     { prefix: '/rss' })
+  await app.register(trpcPlugin,    { prefix: '/trpc' })
 
   return app
 }

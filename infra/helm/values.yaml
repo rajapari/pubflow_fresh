@@ -1,0 +1,63 @@
+global:
+  imageRegistry: ghcr.io/rajapari84/pubflow
+  imageTag: latest
+  namespace: pubflow
+
+api:
+  replicaCount: 2
+  image: api
+  port: 3001
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
+
+web:
+  replicaCount: 2
+  image: web
+  port: 3000
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+worker:
+  replicaCount: 1
+  image: worker
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits:   { cpu: 2000m, memory: 2Gi }
+
+ingress:
+  enabled: true
+  className: nginx
+  tls: true
+  certIssuer: letsencrypt-prod
+  hosts:
+    web: app.pubflow.io
+    api: api.pubflow.io
+
+config:
+  appUrl: "https://app.pubflow.io"
+  apiUrl: "https://api.pubflow.io"
+  keycloakUrl: "https://auth.pubflow.io"
+  keycloakRealm: "pubflow"
+  keycloakClientId: "pubflow-api"
+  minioEndpoint: "minio.pubflow-infra.svc.cluster.local"
+  minioBucket: "pubflow-files"
+  redisUrl: "redis://redis.pubflow-infra.svc.cluster.local:6379/0"
+  smtpHost: "smtp.pubflow.io"
+  smtpPort: "587"
+  smtpFrom: "noreply@pubflow.io"
+  crossrefTestMode: "false"
+  languagetoolUrl: "http://languagetool.pubflow.svc.cluster.local:8082"
+
+# Secrets must be provided via --set or external-secrets-operator
+secrets: {}
+# secrets:
+#   databaseUrl: "postgresql://..."
+#   minioAccessKey: ""
+#   minioSecretKey: ""
+#   keycloakClientSecret: ""
+#   keycloakAdminPassword: ""
+#   onlyofficeJwtSecret: ""
+#   stripeSecretKey: ""
+#   stripeWebhookSecret: ""

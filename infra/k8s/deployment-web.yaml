@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-web
+  namespace: pubflow
+  labels:
+    app: pubflow-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pubflow-web
+  template:
+    metadata:
+      labels:
+        app: pubflow-web
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/rajapari84/pubflow/web:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: pubflow-config
+            - secretRef:
+                name: pubflow-secrets
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

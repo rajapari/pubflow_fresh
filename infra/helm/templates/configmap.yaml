@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pubflow-config
+  namespace: {{ .Values.global.namespace }}
+data:
+  NODE_ENV: "production"
+  APP_URL: {{ .Values.config.appUrl | quote }}
+  API_URL: {{ .Values.config.apiUrl | quote }}
+  NEXT_PUBLIC_API_URL: {{ .Values.config.apiUrl | quote }}
+  KEYCLOAK_URL: {{ .Values.config.keycloakUrl | quote }}
+  KEYCLOAK_REALM: {{ .Values.config.keycloakRealm | quote }}
+  KEYCLOAK_CLIENT_ID: {{ .Values.config.keycloakClientId | quote }}
+  MINIO_ENDPOINT: {{ .Values.config.minioEndpoint | quote }}
+  MINIO_PORT: "9000"
+  MINIO_USE_SSL: "false"
+  MINIO_BUCKET: {{ .Values.config.minioBucket | quote }}
+  REDIS_URL: {{ .Values.config.redisUrl | quote }}
+  SMTP_HOST: {{ .Values.config.smtpHost | quote }}
+  SMTP_PORT: {{ .Values.config.smtpPort | quote }}
+  SMTP_FROM: {{ .Values.config.smtpFrom | quote }}
+  CROSSREF_TEST_MODE: {{ .Values.config.crossrefTestMode | quote }}
+  LANGUAGETOOL_URL: {{ .Values.config.languagetoolUrl | quote }}

@@ -1,0 +1,109 @@
+{{- $cfg := .Values.config }}
+{{- $img := .Values.global.imageRegistry }}
+{{- $tag := .Values.global.imageTag }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-api
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app: pubflow-api
+  template:
+    metadata:
+      labels:
+        app: pubflow-api
+        version: {{ $tag | quote }}
+    spec:
+      containers:
+        - name: api
+          image: "{{ $img }}/{{ .Values.api.image }}:{{ $tag }}"
+          ports:
+            - containerPort: {{ .Values.api.port }}
+          envFrom:
+            - configMapRef: { name: pubflow-config }
+            - secretRef:    { name: pubflow-secrets }
+          readinessProbe:
+            httpGet: { path: /health, port: {{ .Values.api.port }} }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: {{ .Values.api.port }} }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: {{ .Values.api.resources.requests.cpu }}
+              memory: {{ .Values.api.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.api.resources.limits.cpu }}
+              memory: {{ .Values.api.resources.limits.memory }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-web
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      app: pubflow-web
+  template:
+    metadata:
+      labels:
+        app: pubflow-web
+        version: {{ $tag | quote }}
+    spec:
+      containers:
+        - name: web
+          image: "{{ $img }}/{{ .Values.web.image }}:{{ $tag }}"
+          ports:
+            - containerPort: {{ .Values.web.port }}
+          envFrom:
+            - configMapRef: { name: pubflow-config }
+            - secretRef:    { name: pubflow-secrets }
+          readinessProbe:
+            httpGet: { path: /, port: {{ .Values.web.port }} }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.web.resources.requests.cpu }}
+              memory: {{ .Values.web.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.web.resources.limits.cpu }}
+              memory: {{ .Values.web.resources.limits.memory }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-worker
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: pubflow-worker
+  template:
+    metadata:
+      labels:
+        app: pubflow-worker
+        version: {{ $tag | quote }}
+    spec:
+      containers:
+        - name: worker
+          image: "{{ $img }}/{{ .Values.worker.image }}:{{ $tag }}"
+          envFrom:
+            - configMapRef: { name: pubflow-config }
+            - secretRef:    { name: pubflow-secrets }
+          resources:
+            requests:
+              cpu: {{ .Values.worker.resources.requests.cpu }}
+              memory: {{ .Values.worker.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.worker.resources.limits.cpu }}
+              memory: {{ .Values.worker.resources.limits.memory }}

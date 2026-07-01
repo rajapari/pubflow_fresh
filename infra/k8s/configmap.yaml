@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pubflow-config
+  namespace: pubflow
+data:
+  NODE_ENV: "production"
+  APP_URL: "https://app.pubflow.io"
+  API_URL: "https://api.pubflow.io"
+  NEXT_PUBLIC_API_URL: "https://api.pubflow.io"
+  KEYCLOAK_URL: "https://auth.pubflow.io"
+  KEYCLOAK_REALM: "pubflow"
+  KEYCLOAK_CLIENT_ID: "pubflow-api"
+  MINIO_ENDPOINT: "minio.pubflow-infra.svc.cluster.local"
+  MINIO_PORT: "9000"
+  MINIO_USE_SSL: "false"
+  MINIO_BUCKET: "pubflow-files"
+  REDIS_URL: "redis://redis.pubflow-infra.svc.cluster.local:6379/0"
+  SMTP_HOST: "smtp.pubflow.io"
+  SMTP_PORT: "587"
+  SMTP_FROM: "noreply@pubflow.io"
+  PANDOC_SERVICE_URL: "http://pandoc.pubflow.svc.cluster.local:4000"
+  LATEX_SERVICE_URL: "http://latex.pubflow.svc.cluster.local:5001"
+  SCRIBUS_SERVICE_URL: "http://scribus.pubflow.svc.cluster.local:5000"
+  IMAGE_SERVICE_URL: "http://image.pubflow.svc.cluster.local:5002"
+  ONLYOFFICE_URL: "https://office.pubflow.io"
+  ONLYOFFICE_CALLBACK_URL: "https://api.pubflow.io"
+  CROSSREF_TEST_MODE: "false"
+  LANGUAGETOOL_URL: "http://languagetool.pubflow.svc.cluster.local:8082"

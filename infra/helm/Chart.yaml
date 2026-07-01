@@ -1,0 +1,14 @@
+apiVersion: v2
+name: pubflow
+description: End-to-end academic publishing SaaS platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - publishing
+  - academic
+  - journals
+home: https://pubflow.io
+maintainers:
+  - name: PubFlow Team
+    email: ops@pubflow.io

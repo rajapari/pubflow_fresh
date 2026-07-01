@@ -10,6 +10,9 @@ import { publicationRouter } from './publication.js'
 import { tenantRouter }      from './publication.js'
 import { userRouter }        from './user.js'
 import { typeSettingRouter } from './typesetting.js'
+import { billingRouter }     from './billing.js'
+import { grammarRouter }     from './grammar.js'
+import { portalRouter }      from './portal.js'
 
 export const appRouter = router({
   analytics:   analyticsRouter,
@@ -23,6 +26,9 @@ export const appRouter = router({
   tenant:      tenantRouter,
   user:        userRouter,
   typesetting: typeSettingRouter,
+  billing:     billingRouter,
+  grammar:     grammarRouter,
+  portal:      portalRouter,
 })
 
 export type AppRouter = typeof appRouter

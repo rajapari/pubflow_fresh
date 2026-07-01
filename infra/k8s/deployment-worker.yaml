@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-worker
+  namespace: pubflow
+  labels:
+    app: pubflow-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pubflow-worker
+  template:
+    metadata:
+      labels:
+        app: pubflow-worker
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/rajapari84/pubflow/worker:latest
+          envFrom:
+            - configMapRef:
+                name: pubflow-config
+            - secretRef:
+                name: pubflow-secrets
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi

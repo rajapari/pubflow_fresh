@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pubflow-api
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector:
+    app: pubflow-api
+  ports:
+    - port: 80
+      targetPort: {{ .Values.api.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pubflow-web
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector:
+    app: pubflow-web
+  ports:
+    - port: 80
+      targetPort: {{ .Values.web.port }}
