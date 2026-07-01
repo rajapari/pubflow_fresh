@@ -133,7 +133,7 @@ services:
       PENPOT_FLAGS: enable-registration enable-login-with-password
     ports:
       - "3449:80"
-    depends_on: [penpot-backend]
+    depends_on: [penpot-backend, penpot-exporter]
     networks: [tools]
     restart: unless-stopped
 
@@ -145,7 +145,7 @@ services:
       PENPOT_DATABASE_URI: postgresql://pubflow:pubflow_secret@postgres:5432/pubflow
       PENPOT_DATABASE_USERNAME: pubflow
       PENPOT_DATABASE_PASSWORD: pubflow_secret
-      PENPOT_REDIS_URI: redis://:redis_secret@redis:6379/2
+      PENPOT_REDIS_URI: redis://redis:6379/2
       PENPOT_STORAGE_BACKEND: fs
       PENPOT_STORAGE_FS_DIRECTORY: /opt/data/assets
       PENPOT_TELEMETRY_ENABLED: "false"
@@ -154,6 +154,15 @@ services:
       - penpot_data:/opt/data/assets
     depends_on: [postgres, redis]
     networks: [tools, data]
+    restart: unless-stopped
+
+  penpot-exporter:
+    image: penpotapp/exporter:latest
+    container_name: pubflow_penpot_exporter
+    environment:
+      PENPOT_PUBLIC_URI: http://penpot-frontend
+      PENPOT_FLAGS: enable-registration enable-login-with-password
+    networks: [tools]
     restart: unless-stopped
 
   # ── DEV UTILITIES ──────────────────────────────────────
