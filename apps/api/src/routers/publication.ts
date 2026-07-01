@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
-import { router, protectedProcedure, chiefEditorProcedure, adminProcedure } from '../trpc/procedures.js'
+import { router, publicProcedure, protectedProcedure, chiefEditorProcedure, adminProcedure } from '../trpc/procedures.js'
 import { QUEUES } from '@pubflow/types'
 import { createKeycloakUser } from '../lib/keycloak-admin.js'
 
@@ -93,6 +93,14 @@ export const tenantRouter = router({
       doiPrefix:             z.string().optional(),
       crossrefLoginId:       z.string().optional(),
       crossrefLoginPassword: z.string().optional(),
+      pmcFtpHost:            z.string().optional(),
+      pmcFtpUsername:        z.string().optional(),
+      pmcFtpPassword:        z.string().optional(),
+      pmcFtpPath:            z.string().optional(),
+      enablePrintOnDemand:   z.boolean().optional(),
+      luluClientKey:         z.string().optional(),
+      luluClientSecret:      z.string().optional(),
+      luluPodPackageId:      z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       return ctx.prisma.tenantSettings.upsert({
@@ -100,6 +108,58 @@ export const tenantRouter = router({
         update: input,
         create: { tenantId: ctx.user.tenantId, ...input },
       })
+    }),
+
+  // ── Self-service registration (public — no auth) ──────────────────────
+  register: publicProcedure
+    .input(z.object({
+      orgName:   z.string().min(2).max(200),
+      slug:      z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase letters, numbers and hyphens only'),
+      firstName: z.string().min(1).max(100),
+      lastName:  z.string().min(1).max(100),
+      email:     z.string().email(),
+      plan:      z.enum(['STARTER', 'PROFESSIONAL', 'ENTERPRISE']).default('STARTER'),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const slugTaken = await ctx.prisma.tenant.findUnique({ where: { slug: input.slug } })
+      if (slugTaken) throw new TRPCError({ code: 'CONFLICT', message: 'This organisation slug is already taken' })
+
+      let keycloakId: string
+      try {
+        keycloakId = await createKeycloakUser(input.email)
+      } catch (err: any) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Account setup failed: ${err.message}` })
+      }
+
+      const result = await ctx.prisma.$transaction(async tx => {
+        const tenant = await tx.tenant.create({
+          data: {
+            name:   input.orgName,
+            slug:   input.slug,
+            plan:   input.plan,
+            status: 'ACTIVE',
+            settings: { create: { primaryColor: '#534AB7', enablePeerReview: true } },
+          },
+        })
+        const user = await tx.user.create({
+          data: {
+            tenantId:  tenant.id,
+            keycloakId,
+            email:     input.email,
+            firstName: input.firstName,
+            lastName:  input.lastName,
+            role:      'EDITOR_IN_CHIEF',
+            status:    'INVITED',
+          },
+        })
+        return { tenant, user }
+      })
+
+      return {
+        tenantId: result.tenant.id,
+        userId:   result.user.id,
+        message:  'Organisation created. Check your email to set your password.',
+      }
     }),
 
   // ── User management ─────────────────────────────────────────────────────

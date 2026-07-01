@@ -3,6 +3,8 @@ import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure, editorProcedure, chiefEditorProcedure } from '../trpc/procedures.js'
 import { QUEUES } from '@pubflow/types'
 import { depositToCrossRef, type CrossRefArticle } from '../lib/crossref.js'
+import { depositToPubMed } from '../lib/pubmed.js'
+import { submitToLulu } from '../lib/printod.js'
 
 export const issueRouter = router({
 
@@ -254,6 +256,79 @@ export const issueRouter = router({
             .catch(err => console.error('[CrossRef] Deposit error:', err.message))
         } else {
           console.warn('[CrossRef] DOI registration enabled but no credentials found. Set crossrefLoginId/Password in settings or CROSSREF_LOGIN_ID/CROSSREF_LOGIN_PASSWORD env vars.')
+        }
+      }
+
+      // ── HTML static pages → MinIO public/ folder (non-blocking) ────────────
+      const tenantData = await prisma.tenant.findUnique({
+        where:  { id: user.tenantId },
+        select: { slug: true },
+      })
+      if (tenantData?.slug) {
+        const slug = tenantData.slug
+        for (const sub of publishable) {
+          prisma.output.findFirst({
+            where: { submissionId: sub.id, format: 'HTML', status: 'COMPLETED' },
+          }).then(htmlOut => {
+            if (!htmlOut) return
+            return ctx.minio.download(htmlOut.minioKey).then(buf =>
+              ctx.minio.putObject(
+                `public/${slug}/articles/${sub.id}/index.html`,
+                buf,
+                'text/html; charset=utf-8',
+              )
+            )
+          }).catch(err => console.error(`[HTML-MinIO] ${sub.id}:`, err.message))
+        }
+      }
+
+      // ── PubMed Central FTP deposit of JATS XML (non-blocking) ───────────
+      const pmcHost = (settings as any)?.pmcFtpHost    ?? process.env.PMC_FTP_HOST
+      const pmcUser = (settings as any)?.pmcFtpUsername ?? process.env.PMC_FTP_USERNAME
+      const pmcPass = (settings as any)?.pmcFtpPassword ?? process.env.PMC_FTP_PASSWORD
+      if (pmcHost && pmcUser && pmcPass) {
+        for (const sub of publishable) {
+          prisma.output.findFirst({
+            where: { submissionId: sub.id, format: 'JATS_XML', status: 'COMPLETED' },
+          }).then(jatsOut => {
+            if (!jatsOut) return
+            return ctx.minio.download(jatsOut.minioKey).then(buf =>
+              depositToPubMed(
+                buf.toString('utf8'),
+                `pubflow_${sub.id}_${now.getFullYear()}.xml`,
+                {
+                  ftpHost:     pmcHost,
+                  ftpUsername: pmcUser,
+                  ftpPassword: pmcPass,
+                  ftpPath:     (settings as any)?.pmcFtpPath ?? process.env.PMC_FTP_PATH,
+                },
+              )
+            ).then(() => console.info(`[PubMed] Deposited ${sub.id}`))
+          }).catch(err => console.error(`[PubMed] ${sub.id}:`, err.message))
+        }
+      }
+
+      // ── Lulu print-on-demand (non-blocking) ─────────────────────────────
+      const luluKey     = (settings as any)?.luluClientKey    ?? process.env.LULU_CLIENT_KEY
+      const luluSecret  = (settings as any)?.luluClientSecret  ?? process.env.LULU_CLIENT_SECRET
+      const luluPodPkg  = (settings as any)?.luluPodPackageId  ?? process.env.LULU_POD_PACKAGE_ID
+      if ((settings as any)?.enablePrintOnDemand && luluKey && luluSecret && luluPodPkg) {
+        for (const sub of publishable) {
+          prisma.output.findFirst({
+            where: { submissionId: sub.id, format: 'PDF_PRINT', status: 'COMPLETED' },
+          }).then(async pdfOut => {
+            if (!pdfOut) return
+            const interiorUrl = await ctx.minio.client.presignedGetObject(
+              ctx.minio.bucket, pdfOut.minioKey, 3600,
+            )
+            return submitToLulu({
+              title:        sub.title,
+              interiorUrl,
+              contactEmail: process.env.SMTP_FROM ?? 'noreply@pubflow.local',
+              externalId:   sub.id,
+              creds:        { clientKey: luluKey, clientSecret: luluSecret, podPackageId: luluPodPkg },
+            }).then(r => console.info(`[Lulu] Print job ${r.id} (${r.status}) for ${sub.id}`))
+          }).catch(err => console.error(`[Lulu] ${sub.id}:`, err.message))
         }
       }
 

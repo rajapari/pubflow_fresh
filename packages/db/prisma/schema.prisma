@@ -214,6 +214,14 @@ model TenantSettings {
   doiPrefix             String?
   crossrefLoginId       String?
   crossrefLoginPassword String?
+  pmcFtpHost            String?
+  pmcFtpUsername        String?
+  pmcFtpPassword        String?
+  pmcFtpPath            String?
+  enablePrintOnDemand   Boolean @default(false)
+  luluClientKey         String?
+  luluClientSecret      String?
+  luluPodPackageId      String?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 

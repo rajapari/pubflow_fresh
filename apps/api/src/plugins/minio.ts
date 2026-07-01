@@ -42,6 +42,17 @@ export class MinioStorage {
       } else {
         console.info(`✅ MinIO: bucket '${this.bucket}' ready`)
       }
+      // Allow anonymous GET for the public/ prefix (static article HTML pages)
+      const policy = JSON.stringify({
+        Version:   '2012-10-17',
+        Statement: [{
+          Effect:    'Allow',
+          Principal: { AWS: ['*'] },
+          Action:    ['s3:GetObject'],
+          Resource:  [`arn:aws:s3:::${this.bucket}/public/*`],
+        }],
+      })
+      await this.client.setBucketPolicy(this.bucket, policy)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       throw new Error(

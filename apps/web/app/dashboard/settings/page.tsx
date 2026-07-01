@@ -32,6 +32,14 @@ export default function SettingsPage() {
     doiPrefix:             '',
     crossrefLoginId:       '',
     crossrefLoginPassword: '',
+    pmcFtpHost:            '',
+    pmcFtpUsername:        '',
+    pmcFtpPassword:        '',
+    pmcFtpPath:            '',
+    enablePrintOnDemand:   false,
+    luluClientKey:         '',
+    luluClientSecret:      '',
+    luluPodPackageId:      '',
   })
 
   useEffect(() => {
@@ -44,6 +52,14 @@ export default function SettingsPage() {
         doiPrefix:             settings.doiPrefix             ?? '',
         crossrefLoginId:       (settings as any).crossrefLoginId       ?? '',
         crossrefLoginPassword: (settings as any).crossrefLoginPassword ?? '',
+        pmcFtpHost:            (settings as any).pmcFtpHost            ?? '',
+        pmcFtpUsername:        (settings as any).pmcFtpUsername        ?? '',
+        pmcFtpPassword:        (settings as any).pmcFtpPassword        ?? '',
+        pmcFtpPath:            (settings as any).pmcFtpPath            ?? '',
+        enablePrintOnDemand:   (settings as any).enablePrintOnDemand   ?? false,
+        luluClientKey:         (settings as any).luluClientKey         ?? '',
+        luluClientSecret:      (settings as any).luluClientSecret      ?? '',
+        luluPodPackageId:      (settings as any).luluPodPackageId      ?? '',
       })
     }
   }, [settings])
@@ -57,8 +73,16 @@ export default function SettingsPage() {
         enablePeerReview:      form.enablePeerReview,
         enableDoiRegistration: form.enableDoiRegistration,
         doiPrefix:             form.doiPrefix || undefined,
-        crossrefLoginId:       form.crossrefLoginId || undefined,
+        crossrefLoginId:       form.crossrefLoginId       || undefined,
         crossrefLoginPassword: form.crossrefLoginPassword || undefined,
+        pmcFtpHost:            form.pmcFtpHost            || undefined,
+        pmcFtpUsername:        form.pmcFtpUsername        || undefined,
+        pmcFtpPassword:        form.pmcFtpPassword        || undefined,
+        pmcFtpPath:            form.pmcFtpPath            || undefined,
+        enablePrintOnDemand:   form.enablePrintOnDemand,
+        luluClientKey:         form.luluClientKey         || undefined,
+        luluClientSecret:      form.luluClientSecret      || undefined,
+        luluPodPackageId:      form.luluPodPackageId      || undefined,
       })
       toast.success('Settings saved')
       tenantQ.refetch()
@@ -235,6 +259,76 @@ export default function SettingsPage() {
                 Credentials are stored encrypted. DOI deposits go to CrossRef&apos;s test endpoint unless
                 <code className="mx-1 rounded bg-gray-100 px-1 py-0.5">CROSSREF_TEST_MODE=false</code>
                 is set on the server.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* PubMed Central FTP */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">PubMed Central</h3>
+          <p className="text-xs text-gray-400 mb-3">
+            JATS XML files will be deposited via FTP on issue publish if credentials are configured.
+          </p>
+          <div className="space-y-3">
+            {[
+              { key: 'pmcFtpHost',     label: 'FTP host',     placeholder: 'ftp.ncbi.nlm.nih.gov', pw: false },
+              { key: 'pmcFtpUsername', label: 'Username',      placeholder: 'your_pmc_login',        pw: false },
+              { key: 'pmcFtpPassword', label: 'Password',      placeholder: '••••••••',              pw: true  },
+              { key: 'pmcFtpPath',     label: 'Remote path',   placeholder: '/incoming',             pw: false },
+            ].map(({ key, label, placeholder, pw }) => (
+              <div key={key} className="flex items-center gap-4">
+                <label className="block text-sm font-medium text-gray-700 w-40">{label}</label>
+                <input
+                  type={pw ? 'password' : 'text'}
+                  value={(form as any)[key]}
+                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                  placeholder={placeholder}
+                  autoComplete="off"
+                  className="flex-1 max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Print on demand */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Print on Demand (Lulu)</h3>
+          <label className="flex items-center gap-3 mb-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.enablePrintOnDemand}
+              onChange={e => setForm(f => ({ ...f, enablePrintOnDemand: e.target.checked }))}
+              className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+            />
+            <div>
+              <span className="text-sm font-medium text-gray-700">Enable print-on-demand via Lulu</span>
+              <p className="text-xs text-gray-500">Automatically submit PDF_PRINT outputs to Lulu on publish</p>
+            </div>
+          </label>
+          {form.enablePrintOnDemand && (
+            <div className="ml-7 space-y-3">
+              {[
+                { key: 'luluClientKey',    label: 'Client key',    placeholder: 'lulu_api_key',       pw: false },
+                { key: 'luluClientSecret', label: 'Client secret', placeholder: '••••••••',           pw: true  },
+                { key: 'luluPodPackageId', label: 'POD package ID', placeholder: '0600X0900BWSTDSS060UW444MXX', pw: false },
+              ].map(({ key, label, placeholder, pw }) => (
+                <div key={key} className="flex items-center gap-4">
+                  <label className="block text-sm font-medium text-gray-700 w-40">{label}</label>
+                  <input
+                    type={pw ? 'password' : 'text'}
+                    value={(form as any)[key]}
+                    onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    autoComplete="off"
+                    className="flex-1 max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-xs"
+                  />
+                </div>
+              ))}
+              <p className="text-xs text-gray-400">
+                Get your Lulu credentials at <span className="font-mono">developers.lulu.com</span>.
+                POD package ID determines paper size, binding and paper type.
               </p>
             </div>
           )}
