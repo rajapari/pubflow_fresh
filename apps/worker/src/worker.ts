@@ -6,6 +6,9 @@ import { scribusProcessor }      from './processors/scribus.js'
 import { imageProcessor }        from './processors/image.js'
 import { notificationProcessor } from './processors/notification.js'
 import { schedulerProcessor }    from './processors/scheduler.js'
+import { intakeProcessor }       from './processors/intake.js'
+import { copyeditProcessor }     from './processors/copyedit.js'
+import { templateProcessor }     from './processors/template.js'
 
 function parseRedisUrl(url: string) {
   try {
@@ -46,6 +49,9 @@ const workers = [
   new Worker(QUEUES.IMAGE,        imageProcessor,        { ...workerOpts, concurrency: 8 }),
   new Worker(QUEUES.NOTIFICATION, notificationProcessor, { ...workerOpts, concurrency: 10 }),
   new Worker(QUEUES.SCHEDULER,    schedulerProcessor,    { ...workerOpts, concurrency: 1 }),
+  new Worker(QUEUES.INTAKE,       intakeProcessor,       { ...workerOpts, concurrency: 3 }),
+  new Worker(QUEUES.COPYEDIT,     copyeditProcessor,     { ...workerOpts, concurrency: 2 }),
+  new Worker(QUEUES.TEMPLATE,     templateProcessor,     { ...workerOpts, concurrency: 2 }),
 ]
 
 // Register the daily review-reminder cron job.

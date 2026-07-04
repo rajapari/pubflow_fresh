@@ -130,6 +130,16 @@ services:
     networks: [tools]
     restart: unless-stopped
 
+  # InDesign IDML layout extractor — feeds the template-porting bot.
+  idml:
+    build:
+      context: ../../services/idml
+    container_name: pubflow_idml
+    ports:
+      - "4100:4100"
+    networks: [tools]
+    restart: unless-stopped
+
   penpot-frontend:
     image: penpotapp/frontend:latest
     container_name: pubflow_penpot

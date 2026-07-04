@@ -271,6 +271,210 @@ export const proofReviewRouter = router({
       return { url, format: output.format }
     }),
 
+  // ── Online proof workbench ─────────────────────────────
+  // Authors and editors view the typeset PDF in the browser, answer numbered
+  // queries (Q1, Q2, …) and mark structured corrections that the Correction
+  // Applier bot later feeds back into typesetting.
+
+  // Everything the workbench page needs in one call.
+  workbench: protectedProcedure
+    .input(z.object({ proofReviewId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const review = await ctx.prisma.proofReview.findUniqueOrThrow({
+        where: { id: input.proofReviewId },
+        include: {
+          submission: { select: { id: true, title: true, status: true, authorId: true, tenantId: true } },
+          reviewer:   { select: { id: true, email: true, firstName: true, lastName: true } },
+          output:     true,
+          queries:     { orderBy: { createdAt: 'asc' } },
+          corrections: { orderBy: { createdAt: 'asc' } },
+        },
+      })
+
+      const isAuthor   = review.submission.authorId === ctx.user.id
+      const isReviewer = review.reviewerId === ctx.user.id
+      const isEditor   = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'PROOF_READER', 'TYPESETTER'].includes(ctx.user.role)
+      if (!isAuthor && !isReviewer && !isEditor)
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized for this proof' })
+      if (review.submission.tenantId !== ctx.user.tenantId)
+        throw new TRPCError({ code: 'FORBIDDEN' })
+
+      let pdfUrl: string | null = null
+      if (review.output?.minioKey) {
+        pdfUrl = await ctx.minio.client.presignedGetObject(ctx.minio.bucket, review.output.minioKey, 3600)
+      }
+
+      return { review, pdfUrl, role: { isAuthor, isReviewer, isEditor } }
+    }),
+
+  // Raise a query on the proof (copyeditor/typesetter/editor).
+  addQuery: protectedProcedure
+    .input(z.object({
+      proofReviewId: z.string().uuid(),
+      question: z.string().min(3).max(2000),
+      page: z.number().int().min(1).optional(),
+      posX: z.number().min(0).max(1).optional(),
+      posY: z.number().min(0).max(1).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'TYPESETTER', 'PROOF_READER'].includes(ctx.user.role))
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only production staff can raise proof queries' })
+
+      const review = await ctx.prisma.proofReview.findUniqueOrThrow({
+        where: { id: input.proofReviewId },
+        include: { submission: { select: { tenantId: true } }, queries: { select: { id: true } } },
+      })
+      if (review.submission.tenantId !== ctx.user.tenantId) throw new TRPCError({ code: 'FORBIDDEN' })
+
+      return ctx.prisma.proofQuery.create({
+        data: {
+          proofReviewId: input.proofReviewId,
+          submissionId:  review.submissionId,
+          label:         `Q${review.queries.length + 1}`,
+          raisedBy:      ctx.user.id,
+          question:      input.question,
+          page:          input.page,
+          posX:          input.posX,
+          posY:          input.posY,
+        },
+      })
+    }),
+
+  // Answer a query (author or editor).
+  answerQuery: protectedProcedure
+    .input(z.object({
+      queryId: z.string().uuid(),
+      answer:  z.string().min(1).max(4000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const query = await ctx.prisma.proofQuery.findUniqueOrThrow({
+        where: { id: input.queryId },
+        include: { proofReview: { include: { submission: { select: { authorId: true, tenantId: true } } } } },
+      })
+      const sub = query.proofReview.submission
+      const isAuthor = sub.authorId === ctx.user.id
+      const isEditor = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR'].includes(ctx.user.role)
+      if (!isAuthor && !isEditor) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (sub.tenantId !== ctx.user.tenantId) throw new TRPCError({ code: 'FORBIDDEN' })
+
+      return ctx.prisma.proofQuery.update({
+        where: { id: input.queryId },
+        data: {
+          status:       'ANSWERED',
+          answer:       input.answer,
+          answeredById: ctx.user.id,
+          answeredAt:   new Date(),
+        },
+      })
+    }),
+
+  // Mark a query resolved once production has actioned the answer.
+  resolveQuery: protectedProcedure
+    .input(z.object({ queryId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'TYPESETTER', 'PROOF_READER'].includes(ctx.user.role))
+        throw new TRPCError({ code: 'FORBIDDEN' })
+      const query = await ctx.prisma.proofQuery.findUniqueOrThrow({
+        where: { id: input.queryId },
+        include: { proofReview: { include: { submission: { select: { tenantId: true } } } } },
+      })
+      if (query.proofReview.submission.tenantId !== ctx.user.tenantId) throw new TRPCError({ code: 'FORBIDDEN' })
+
+      return ctx.prisma.proofQuery.update({
+        where: { id: input.queryId },
+        data:  { status: 'RESOLVED' },
+      })
+    }),
+
+  // Mark a correction on the proof (author, reviewer, or editor).
+  addCorrection: protectedProcedure
+    .input(z.object({
+      proofReviewId: z.string().uuid(),
+      kind: z.enum(['INSERT', 'DELETE', 'REPLACE', 'MOVE', 'QUERY_ANSWER', 'COMMENT']),
+      page: z.number().int().min(1).optional(),
+      posX: z.number().min(0).max(1).optional(),
+      posY: z.number().min(0).max(1).optional(),
+      targetText: z.string().max(2000).optional(),
+      newText:    z.string().max(4000).optional(),
+      note:       z.string().max(2000).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const review = await ctx.prisma.proofReview.findUniqueOrThrow({
+        where: { id: input.proofReviewId },
+        include: { submission: { select: { authorId: true, tenantId: true, status: true } } },
+      })
+      const isAuthor   = review.submission.authorId === ctx.user.id
+      const isReviewer = review.reviewerId === ctx.user.id
+      const isEditor   = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'PROOF_READER'].includes(ctx.user.role)
+      if (!isAuthor && !isReviewer && !isEditor) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (review.submission.tenantId !== ctx.user.tenantId) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (review.status === 'SUBMITTED')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Proof already submitted — corrections are closed' })
+      if ((input.kind === 'REPLACE' || input.kind === 'DELETE') && !input.targetText)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `${input.kind} requires targetText` })
+      if ((input.kind === 'REPLACE' || input.kind === 'INSERT') && !input.newText)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `${input.kind} requires newText` })
+
+      return ctx.prisma.proofCorrection.create({
+        data: {
+          proofReviewId: input.proofReviewId,
+          submissionId:  review.submissionId,
+          markedById:    ctx.user.id,
+          kind:          input.kind,
+          page:          input.page,
+          posX:          input.posX,
+          posY:          input.posY,
+          targetText:    input.targetText,
+          newText:       input.newText,
+          note:          input.note,
+        },
+      })
+    }),
+
+  // Accept / reject / apply a correction (editors and typesetters).
+  setCorrectionStatus: protectedProcedure
+    .input(z.object({
+      correctionId: z.string().uuid(),
+      status: z.enum(['ACCEPTED', 'REJECTED', 'APPLIED']),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'TYPESETTER', 'PROOF_READER'].includes(ctx.user.role))
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only production staff can action corrections' })
+      const correction = await ctx.prisma.proofCorrection.findUniqueOrThrow({
+        where: { id: input.correctionId },
+        include: { proofReview: { include: { submission: { select: { tenantId: true } } } } },
+      })
+      if (correction.proofReview.submission.tenantId !== ctx.user.tenantId)
+        throw new TRPCError({ code: 'FORBIDDEN' })
+
+      return ctx.prisma.proofCorrection.update({
+        where: { id: input.correctionId },
+        data: {
+          status:       input.status,
+          resolvedById: ctx.user.id,
+          resolvedAt:   new Date(),
+        },
+      })
+    }),
+
+  // Delete own correction while the proof is still open.
+  deleteCorrection: protectedProcedure
+    .input(z.object({ correctionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const correction = await ctx.prisma.proofCorrection.findUniqueOrThrow({
+        where: { id: input.correctionId },
+        include: { proofReview: true },
+      })
+      const isOwner  = correction.markedById === ctx.user.id
+      const isEditor = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR'].includes(ctx.user.role)
+      if (!isOwner && !isEditor) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (correction.status !== 'OPEN')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only OPEN corrections can be deleted' })
+
+      await ctx.prisma.proofCorrection.delete({ where: { id: input.correctionId } })
+      return { success: true }
+    }),
+
   // Get list of outputs (to link with proof review)
   listOutputs: protectedProcedure
     .input(z.object({ submissionId: z.string().uuid() }))

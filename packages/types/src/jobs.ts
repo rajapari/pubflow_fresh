@@ -19,6 +19,9 @@ export const LatexJobSchema = z.object({
   documentClass: z.string().default('article'),
   engine: z.enum(['xelatex','lualatex','pdflatex']).default('xelatex'),
   passes: z.number().min(1).max(4).default(2),
+  // Ported publisher template (.cls) compiled alongside the source.
+  templateMinioKey: z.string().optional(),
+  templateClassName: z.string().optional(),
 })
 export type LatexJob = z.infer<typeof LatexJobSchema>
 
@@ -59,6 +62,66 @@ export const NotificationJobSchema = z.object({
 })
 export type NotificationJob = z.infer<typeof NotificationJobSchema>
 
+// ── Intake: file classifier / separator ──────────────────
+// Classifies every file in a submission bundle and routes it to the right
+// AssetType. Positively separates SUPPLEMENTARY material and the single
+// GRAPHICAL_ABSTRACT so they can be linked to the final deliverable.
+export const IntakeFileSchema = z.object({
+  minioKey: z.string(),
+  filename: z.string().min(1).max(255),
+  mimeType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  uploadedById: z.string().uuid(),
+  // When present, re-classify (update) this existing Asset instead of creating one.
+  assetId: z.string().uuid().optional(),
+})
+export type IntakeFile = z.infer<typeof IntakeFileSchema>
+
+export const IntakeJobSchema = z.object({
+  type: z.literal('INTAKE'),
+  submissionId: z.string().uuid(),
+  files: z.array(IntakeFileSchema).min(1),
+  // Use AI vision to positively identify the graphical abstract among figures.
+  useVision: z.boolean().default(true),
+})
+export type IntakeJob = z.infer<typeof IntakeJobSchema>
+
+// ── Copyediting: pluggable style-manual engine ───────────
+// In-house style is just another profile layered on top of a base manual.
+export const StyleManualSchema = z.enum([
+  'INHOUSE','APA7','CHICAGO17','AMA11','MLA9','VANCOUVER','IEEE','CSE','HARVARD',
+])
+export type StyleManual = z.infer<typeof StyleManualSchema>
+
+export const CopyEditJobSchema = z.object({
+  type: z.literal('COPYEDIT'),
+  submissionId: z.string().uuid(),
+  copyEditId: z.string().uuid(),
+  inputMinioKey: z.string(),
+  inputFormat: z.enum(['docx','markdown','latex','odt']),
+  styleProfileId: z.string().uuid().optional(),
+  styleManual: StyleManualSchema.default('INHOUSE'),
+  // CSL style key used by the reference formatter (citeproc/Pandoc).
+  cslStyle: z.string().default('apa'),
+  // Extra in-house overlay instructions applied on top of the base manual.
+  houseRules: z.array(z.string()).default([]),
+  // Run the LLM copyeditor pass (tracked changes) after deterministic rules.
+  applyAi: z.boolean().default(true),
+})
+export type CopyEditJob = z.infer<typeof CopyEditJobSchema>
+
+// ── Typesetting: publisher template porting ──────────────
+// Recreates a publisher's InDesign (IDML) / LaTeX layout as a reusable
+// Scribus or LaTeX template asset on the platform.
+export const TemplatePortJobSchema = z.object({
+  type: z.literal('TEMPLATE_PORT'),
+  templateId: z.string().uuid(),
+  sourceMinioKey: z.string(),
+  sourceFormat: z.enum(['idml','indd','latex','pdf']),
+  targetEngine: z.enum(['SCRIBUS','LATEX']),
+})
+export type TemplatePortJob = z.infer<typeof TemplatePortJobSchema>
+
 export const QUEUES = {
   PANDOC: 'pandoc',
   LATEX: 'latex',
@@ -66,5 +129,8 @@ export const QUEUES = {
   IMAGE: 'image',
   NOTIFICATION: 'notification',
   SCHEDULER: 'scheduler',
+  INTAKE: 'intake',
+  COPYEDIT: 'copyedit',
+  TEMPLATE: 'template',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

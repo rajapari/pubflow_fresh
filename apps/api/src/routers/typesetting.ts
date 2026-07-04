@@ -58,18 +58,49 @@ export const typeSettingRouter = router({
       submissionId: z.string().uuid(),
       engine:       z.enum(['LATEX', 'PANDOC', 'SCRIBUS']),
       outputFormat: z.enum(['PDF_PRINT', 'PDF_WEB', 'EPUB', 'HTML', 'JATS_XML']),
+      // Ported publisher layout to typeset against (see layoutTemplate router).
+      templateId:   z.string().uuid().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { user, prisma, queues } = ctx
       const sub = await prisma.submission.findFirst({
         where:   { id: input.submissionId, tenantId: user.tenantId },
-        include: { manuscripts: { where: { isLatest: true } } },
+        include: {
+          manuscripts: { where: { isLatest: true } },
+          publication: { select: { id: true } },
+        },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
       if (!TYPESETTING_STATUSES.includes(sub.status as typeof TYPESETTING_STATUSES[number]))
         throw new TRPCError({ code: 'BAD_REQUEST', message: `Submission must be in a production stage (currently ${sub.status})` })
       if (!sub.manuscripts[0])
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'No manuscript uploaded yet' })
+
+      // Resolve the layout template: explicit id, else publication default.
+      let template = null
+      if (input.templateId) {
+        template = await prisma.layoutTemplate.findFirst({
+          where: { id: input.templateId, tenantId: user.tenantId },
+        })
+        if (!template) throw new TRPCError({ code: 'NOT_FOUND', message: 'Layout template not found' })
+        if (template.status !== 'READY' || !template.generatedMinioKey)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: `Template is ${template.status}, not READY` })
+      } else if (input.engine !== 'PANDOC') {
+        template = await prisma.layoutTemplate.findFirst({
+          where: {
+            tenantId: user.tenantId,
+            targetEngine: input.engine,
+            status: 'READY',
+            isDefault: true,
+            OR: [{ publicationId: sub.publication.id }, { publicationId: null }],
+          },
+          orderBy: { publicationId: { sort: 'desc', nulls: 'last' } },
+        })
+      }
+      if (template && template.targetEngine !== input.engine)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Template targets ${template.targetEngine}, not ${input.engine}` })
+      if (input.engine === 'SCRIBUS' && !template?.generatedMinioKey)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Scribus typesetting requires a READY layout template' })
 
       const output = await prisma.output.create({
         data: {
@@ -106,9 +137,22 @@ export const typeSettingRouter = router({
         jobData['outputFormat'] = pandocFmt
         jobData['options']      = { citationStyle: 'apa' }
       } else if (input.engine === 'LATEX') {
-        jobData['documentClass'] = 'article'
+        // Class name must match the filename the worker writes for the ported template.
+        const className = template
+          ? template.name.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'pubflowtemplate'
+          : 'article'
+        jobData['documentClass'] = className
         jobData['engine']        = 'xelatex'
         jobData['passes']        = 2
+        if (template?.generatedMinioKey) {
+          jobData['templateMinioKey']  = template.generatedMinioKey
+          jobData['templateClassName'] = className
+        }
+      } else if (input.engine === 'SCRIBUS') {
+        jobData['templateMinioKey'] = template!.generatedMinioKey
+        jobData['contentMinioKey']  = sub.manuscripts[0].minioKey
+        jobData['assetMinioKeys']   = []
+        jobData['outputFormat']     = input.outputFormat === 'PDF_PRINT' ? 'PDF_X4' : 'PDF'
       }
 
       await queues[queueMap[input.engine]].add('typeset', jobData)

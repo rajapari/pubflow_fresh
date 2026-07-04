@@ -211,6 +211,24 @@ export default function ProofReviewPage() {
                     Submitted {new Date(r.submittedAt).toLocaleDateString()}
                   </p>
                 )}
+                {/* span, not <a>: anchors can't nest inside the row button */}
+                <span
+                  role="link"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    window.location.href = `/dashboard/submissions/${submissionId}/proof/${r.id}`
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.stopPropagation()
+                      window.location.href = `/dashboard/submissions/${submissionId}/proof/${r.id}`
+                    }
+                  }}
+                  className="mt-1.5 inline-block text-xs font-medium text-brand-600 hover:underline"
+                >
+                  Open proof workbench →
+                </span>
               </button>
             ))
           )}

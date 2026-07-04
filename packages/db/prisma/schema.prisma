@@ -111,7 +111,56 @@ enum AssetType {
   FIGURE
   TABLE
   SUPPLEMENTARY
+  GRAPHICAL_ABSTRACT
   COVER
+}
+
+enum StyleManual {
+  INHOUSE
+  APA7
+  CHICAGO17
+  AMA11
+  MLA9
+  VANCOUVER
+  IEEE
+  CSE
+  HARVARD
+}
+
+enum TemplateSourceFormat {
+  IDML
+  INDD
+  LATEX
+  PDF
+}
+
+enum TemplateStatus {
+  DRAFT
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum ProofCorrectionKind {
+  INSERT
+  DELETE
+  REPLACE
+  MOVE
+  QUERY_ANSWER
+  COMMENT
+}
+
+enum ProofCorrectionStatus {
+  OPEN
+  ACCEPTED
+  REJECTED
+  APPLIED
+}
+
+enum ProofQueryStatus {
+  OPEN
+  ANSWERED
+  RESOLVED
 }
 
 enum AssetStatus {
@@ -194,11 +243,13 @@ model Tenant {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  users         User[]
-  publications  Publication[]
-  submissions   Submission[]
-  subscriptions Subscription[]
-  settings      TenantSettings?
+  users          User[]
+  publications   Publication[]
+  submissions    Submission[]
+  subscriptions  Subscription[]
+  settings       TenantSettings?
+  styleProfiles  StyleProfile[]
+  layoutTemplates LayoutTemplate[]
 
   @@map("tenants")
 }
@@ -272,9 +323,11 @@ model Publication {
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  submissions Submission[]
-  issues      Issue[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submissions     Submission[]
+  issues          Issue[]
+  styleProfiles   StyleProfile[]
+  layoutTemplates LayoutTemplate[]
 
   @@unique([tenantId, title])
   @@index([tenantId])
@@ -401,12 +454,128 @@ model ProofReview {
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
-  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  output     Output?    @relation(fields: [outputId], references: [id])
-  reviewer   User       @relation(fields: [reviewerId], references: [id])
+  submission  Submission        @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  output      Output?           @relation(fields: [outputId], references: [id])
+  reviewer    User              @relation(fields: [reviewerId], references: [id])
+  queries     ProofQuery[]
+  corrections ProofCorrection[]
 
   @@index([submissionId])
   @@map("proof_reviews")
+}
+
+// A query raised by a copyeditor / typesetter on a proof, answered by the
+// author or editor in the online proof workbench.
+model ProofQuery {
+  id            String           @id @default(uuid())
+  proofReviewId String
+  submissionId  String
+  // Sequential label shown on the proof, e.g. "Q1", "Q2".
+  label         String
+  raisedBy      String?
+  question      String
+  // 1-based page + normalized position for the on-page pin.
+  page          Int?
+  posX          Float?
+  posY          Float?
+  status        ProofQueryStatus @default(OPEN)
+  answer        String?
+  answeredById  String?
+  answeredAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  proofReview ProofReview @relation(fields: [proofReviewId], references: [id], onDelete: Cascade)
+
+  @@index([proofReviewId])
+  @@index([submissionId])
+  @@map("proof_queries")
+}
+
+// A correction marked on a proof by an author or editor. Structured so the
+// Correction Applier bot can patch the source and re-typeset.
+model ProofCorrection {
+  id            String                @id @default(uuid())
+  proofReviewId String
+  submissionId  String
+  markedById    String
+  kind          ProofCorrectionKind
+  page          Int?
+  posX          Float?
+  posY          Float?
+  // Original text targeted (for REPLACE/DELETE) and the new/inserted text.
+  targetText    String?
+  newText       String?
+  note          String?
+  status        ProofCorrectionStatus @default(OPEN)
+  resolvedById  String?
+  resolvedAt    DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  proofReview ProofReview @relation(fields: [proofReviewId], references: [id], onDelete: Cascade)
+
+  @@index([proofReviewId])
+  @@index([submissionId])
+  @@map("proof_corrections")
+}
+
+// A reusable copyediting style profile. In-house style is just an INHOUSE
+// profile; publisher manuals (APA/Chicago/AMA…) are separate profiles.
+// tenantId scopes ownership; publicationId (optional) narrows it to one journal.
+model StyleProfile {
+  id            String      @id @default(uuid())
+  tenantId      String
+  publicationId String?
+  name          String
+  manual        StyleManual @default(INHOUSE)
+  // CSL style key used by the reference formatter (citeproc/Pandoc).
+  cslStyle      String      @default("apa")
+  // LanguageTool rule-pack id and AI copyeditor prompt id for this manual.
+  rulesetKey    String?
+  promptKey     String?
+  // In-house overlay instructions applied on top of the base manual.
+  houseRules    String[]    @default([])
+  isDefault     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  publication Publication? @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([publicationId])
+  @@map("style_profiles")
+}
+
+// A publisher layout (InDesign IDML / LaTeX) ported into a reusable Scribus
+// or LaTeX template asset used by the typesetting stage.
+model LayoutTemplate {
+  id            String               @id @default(uuid())
+  tenantId      String
+  publicationId String?
+  name          String
+  sourceFormat  TemplateSourceFormat
+  targetEngine  LayoutEngine
+  // Original publisher file and the generated Scribus/LaTeX template.
+  sourceMinioKey    String
+  generatedMinioKey String?
+  // Extracted geometry / styles / fonts / swatches from the source layout.
+  spec          Json                 @default("{}")
+  status        TemplateStatus       @default(DRAFT)
+  errorMessage  String?
+  version       Int                  @default(1)
+  isDefault     Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  publication Publication? @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([publicationId])
+  @@map("layout_templates")
 }
 
 model CopyEdit {
@@ -417,6 +586,10 @@ model CopyEdit {
   editedKey    String?
   comments     String?
   editorNotes  String?
+  // Style-manual which the automated copyedit bot ran against.
+  styleManual  StyleManual?
+  // Output of the automated style/language bot: counts + suggestions report.
+  botReport    Json?
   assignedAt   DateTime       @default(now())
   submittedAt  DateTime?
   approvedAt   DateTime?

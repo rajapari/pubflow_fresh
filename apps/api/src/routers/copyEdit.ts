@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure, editorProcedure } from '../trpc/procedures.js'
 import { QUEUES } from '@pubflow/types'
 import { MinioStorage } from '../plugins/minio.js'
+import { dispatchCopyEditStyleBot } from '../lib/bot-dispatch.js'
 
 const COPY_EDITOR_ROLES = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR'] as const
 
@@ -63,6 +64,14 @@ export const copyEditRouter = router({
         to: [copyEditor.email],
         template: 'COPY_EDIT_ASSIGNED',
         data: { submissionId: input.submissionId, title: sub.title, copyEditId: copyEdit.id },
+      })
+
+      // Auto-run the style-manual bot so the copyeditor starts with a report.
+      await dispatchCopyEditStyleBot(prisma, queues, {
+        copyEditId:    copyEdit.id,
+        submissionId:  input.submissionId,
+        tenantId:      user.tenantId,
+        publicationId: sub.publicationId,
       })
 
       return copyEdit
@@ -215,6 +224,77 @@ export const copyEditRouter = router({
           submittedAt: new Date(),
         },
       })
+    }),
+
+  // Run the automated style-manual bot (APA/Chicago/AMA/… or in-house) over
+  // the manuscript. Results land in CopyEdit.botReport for the copyeditor to
+  // review — suggestions are never auto-applied.
+  runStyleBot: protectedProcedure
+    .input(z.object({
+      id:             z.string().uuid(),
+      styleProfileId: z.string().uuid().optional(),
+      styleManual:    z.enum(['INHOUSE','APA7','CHICAGO17','AMA11','MLA9','VANCOUVER','IEEE','CSE','HARVARD']).optional(),
+      applyAi:        z.boolean().default(true),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma, queues } = ctx
+      const ce = await prisma.copyEdit.findUnique({
+        where: { id: input.id },
+        include: {
+          submission: {
+            include: {
+              manuscripts: { where: { isLatest: true }, take: 1 },
+              publication: { select: { id: true } },
+            },
+          },
+        },
+      })
+      if (!ce) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (ce.submission.tenantId !== user.tenantId) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (ce.editorId !== user.id && !COPY_EDITOR_ROLES.includes(user.role as typeof COPY_EDITOR_ROLES[number]))
+        throw new TRPCError({ code: 'FORBIDDEN' })
+
+      // Prefer the copyeditor's edited file; fall back to the latest manuscript.
+      const manuscript = ce.submission.manuscripts[0]
+      const inputMinioKey = ce.editedKey ?? manuscript?.minioKey
+      if (!inputMinioKey)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No manuscript file to analyze' })
+
+      const FORMAT_MAP: Record<string, 'docx'|'markdown'|'latex'|'odt'> = {
+        DOCX: 'docx', LATEX: 'latex', MARKDOWN: 'markdown', ODT: 'odt',
+      }
+      const inputFormat = FORMAT_MAP[manuscript?.format ?? 'DOCX']
+      if (!inputFormat)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Unsupported manuscript format: ${manuscript?.format}` })
+
+      // Resolve default style profile: explicit input > publication default > tenant default.
+      let styleProfileId = input.styleProfileId
+      if (!styleProfileId && !input.styleManual) {
+        const profile = await prisma.styleProfile.findFirst({
+          where: {
+            tenantId: user.tenantId,
+            OR: [{ publicationId: ce.submission.publication.id }, { publicationId: null }],
+            isDefault: true,
+          },
+          orderBy: { publicationId: { sort: 'desc', nulls: 'last' } }, // publication-specific first
+        })
+        styleProfileId = profile?.id
+      }
+
+      await queues[QUEUES.COPYEDIT].add('style-bot', {
+        type: 'COPYEDIT',
+        submissionId: ce.submissionId,
+        copyEditId: ce.id,
+        inputMinioKey,
+        inputFormat,
+        styleProfileId,
+        styleManual: input.styleManual ?? 'INHOUSE',
+        cslStyle: 'apa',
+        houseRules: [],
+        applyAi: input.applyAi,
+      })
+
+      return { queued: true }
     }),
 
   approve: editorProcedure

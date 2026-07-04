@@ -9,23 +9,36 @@ export async function latexProcessor(job: Job) {
   await prisma.output.update({ where: { id: d.outputId }, data: { status: 'PROCESSING', jobId: job.id } })
   try {
     const input = await downloadFromMinio(d.inputMinioKey)
+
+    // Ported publisher template (.cls) rides along as a compile resource.
+    const resources: Record<string, string> = {}
+    if (d.templateMinioKey) {
+      const cls = await downloadFromMinio(d.templateMinioKey)
+      const clsName = `${d.templateClassName ?? 'pubflowtemplate'}.cls`
+      resources[clsName] = cls.toString('base64')
+    }
+
     const res = await fetch(`${process.env.LATEX_SERVICE_URL ?? 'http://localhost:5003'}/compile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        latex: input.toString('utf-8'),
+        source: input.toString('utf-8'),
+        latex: input.toString('utf-8'), // legacy key for older service builds
         engine: d.engine,
         documentClass: d.documentClass,
         passes: d.passes,
+        resources,
       }),
     })
     if (!res.ok) throw new Error(await res.text())
-    const result = await res.json() as {
+    const raw = await res.json() as {
       pdf: string
-      logs: string
-      errors: string[]
-      metadata: Record<string, unknown>
+      logs?: string
+      errors?: string[]
+      metadata?: Record<string, unknown>
     }
+    // Older service builds return only {pdf, size} — normalize.
+    const result = { ...raw, logs: raw.logs ?? '', errors: raw.errors ?? [] }
 
     const pdf = Buffer.from(result.pdf, 'base64')
     const outputKey = `outputs/${d.submissionId}/submission_${d.outputId}.pdf`

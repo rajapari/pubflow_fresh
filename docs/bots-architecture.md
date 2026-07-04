@@ -1,0 +1,342 @@
+# PubFlow Stage-Bot Architecture
+
+**Status:** Living specification · Last updated 2026-07-05
+**Scope:** Automated "bots" (queue workers + AI assistants) supporting every stage of the publishing pipeline, from submission intake to post-publication marketing.
+
+Legend used throughout:
+
+| Mark | Meaning |
+|---|---|
+| ✅ | Implemented and wired into the codebase |
+| 🔜 | Specified here, not yet built |
+| 🤖 | LLM-powered (uses the shared AI client) |
+
+---
+
+## 1. Goals & Principles
+
+1. **One bot per stage responsibility.** Each bot does a single, well-defined job for one workflow stage and reports its result into the database, never silently.
+2. **Humans decide; bots prepare.** Bots produce reports, suggestions, scaffolds, and classifications. Editorial decisions, copyedit acceptance, and proof approval always remain human actions. AI suggestions are never auto-applied to content.
+3. **Graceful degradation.** Every AI-powered path checks `aiEnabled()` and falls back to deterministic behavior when no API key is configured. A bot failing to enqueue must never block an editorial transition (`bot-dispatch.ts` swallows and logs).
+4. **Data-driven extensibility.** Adding a new style manual, layout template, or notification is a data/config change, not an engine change.
+5. **Everything auditable.** Bots write `WorkflowLog` entries with `performedBy: 'SYSTEM'` and structured metadata; large reports are archived to MinIO.
+
+---
+
+## 2. System Architecture
+
+```
+                 ┌────────────────────────────────────────────────┐
+                 │                 apps/web (Next.js)             │
+                 │  dashboards · proof workbench · style profiles │
+                 └───────────────────────┬────────────────────────┘
+                                         │ tRPC
+                 ┌───────────────────────▼────────────────────────┐
+                 │               apps/api (Fastify)               │
+                 │  routers/*  ·  lib/bot-dispatch.ts (orchestr.) │
+                 └──────┬──────────────────────────────┬──────────┘
+                        │ Prisma                       │ BullMQ enqueue
+                 ┌──────▼──────┐                ┌──────▼──────────────────┐
+                 │  PostgreSQL │                │        Redis            │
+                 └─────────────┘                │  queues: pandoc, latex, │
+                                                │  scribus, image, notif, │
+                                                │  scheduler, intake,     │
+                                                │  copyedit, template     │
+                                                └──────┬──────────────────┘
+                                                       │ BullMQ consume
+                 ┌─────────────────────────────────────▼──────────┐
+                 │              apps/worker (Node)                │
+                 │  processors/* · lib/ai.ts · lib/style-manuals  │
+                 │  lib/template-gen.ts · lib/storage.ts          │
+                 └──┬──────────┬──────────┬──────────┬────────────┘
+                    │          │          │          │
+              ┌─────▼───┐ ┌────▼────┐ ┌───▼────┐ ┌───▼────────────┐
+              │ Pandoc  │ │ LaTeX   │ │Scribus │ │ IDML extractor │  + LanguageTool,
+              │ :5005   │ │ :5003   │ │ :5000  │ │ :4100          │    MinIO, Anthropic API
+              └─────────┘ └─────────┘ └────────┘ └────────────────┘
+```
+
+### 2.1 Queues ✅
+
+Defined in `packages/types/src/jobs.ts` (`QUEUES` const). The API's bull plugin (`apps/api/src/plugins/bull.ts`) creates a producer `Queue` for **every** entry automatically; the worker (`apps/worker/src/worker.ts`) registers one `Worker` per queue.
+
+| Queue | Processor | Concurrency | Purpose |
+|---|---|---|---|
+| `pandoc` | `pandoc.ts` | 5 | Format conversion (DOCX/LaTeX/MD/ODT → PDF/EPUB/HTML/JATS/…) |
+| `latex` | `latex.ts` | 2 | XeLaTeX/LuaLaTeX PDF composition (supports ported `.cls` templates) |
+| `scribus` | `scribus.ts` | 2 | PDF/X-4 page layout from `.sla` templates |
+| `image` | `image.ts` | 8 | DPI/color-mode validation, ICC, thumbnails, web optimization |
+| `notification` | `notification.ts` | 10 | Templated email via SMTP/Mailpit |
+| `scheduler` | `scheduler.ts` | 1 | Cron jobs (review reminders, future dunning/alerts) |
+| `intake` ✅ | `intake.ts` | 3 | Submission file classification & separation |
+| `copyedit` ✅ | `copyedit.ts` | 2 | Style-manual analysis (LanguageTool + AI) |
+| `template` ✅ | `template.ts` | 2 | Publisher layout porting (IDML → Scribus/LaTeX) |
+
+**Adding a queue** = add to `QUEUES` + a Zod job schema in `jobs.ts`, a processor in `apps/worker/src/processors/`, and one `new Worker(...)` line in `worker.ts`. The API side needs nothing.
+
+### 2.2 Shared AI client ✅ (`apps/worker/src/lib/ai.ts`)
+
+- Direct `fetch` to the Anthropic Messages API — **no SDK dependency**.
+- `aiEnabled()` → boolean gate; `aiText(prompt, opts)` → free text; `aiJSON<T>(prompt, opts)` → fence-stripped, validated JSON; `opts.images[]` → base64 vision inputs.
+- Env vars: `ANTHROPIC_API_KEY` (required to enable), `ANTHROPIC_MODEL` (default `claude-sonnet-5`), `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`, `ANTHROPIC_TIMEOUT_MS` (default 60 000).
+- Every AI-powered bot must catch AI errors and continue with the deterministic result.
+
+### 2.3 Orchestrator ✅ (`apps/api/src/lib/bot-dispatch.ts`)
+
+Central stage-bot dispatch, called from routers after a status transition commits:
+
+- `dispatchStageBots(prisma, queues, submissionId, toStatus)` — switch on target status. Currently: `SUBMITTED` → enqueue intake classification of all uploaded assets. Future stages plug into the same switch (see §5).
+- `dispatchCopyEditStyleBot(...)` — fired by `copyEdit.assign`; resolves the default `StyleProfile` (publication-specific beats tenant-wide) and enqueues the style bot.
+- **Contract:** dispatch is best-effort; all errors are caught and logged, never thrown, so workflow transitions cannot be blocked by bot infrastructure.
+
+Hooked call sites: `submission.submit`, `submission.advanceStatus`, `copyEdit.assign`. Any new transition-performing mutation **must** call `dispatchStageBots`.
+
+### 2.4 Workflow state machine (unchanged, authoritative)
+
+`packages/types/src/submission.ts` — `SubmissionStatus` + `VALID_TRANSITIONS` + `isValidTransition()`. Bots key off transitions *into* a status. The production chain:
+
+```
+ACCEPTED → COPY_EDITING → ARTWORK_PROCESSING → TYPESETTING → PROOF_REVIEW ⇄ TYPESETTING
+                                                                 │
+                                                             APPROVED → PUBLISHED
+```
+
+---
+
+## 3. Data Model (Prisma)
+
+Added by migrations `20260705000000_add_stage_bots` and `20260705000001_copyedit_style_bot`:
+
+| Addition | Purpose |
+|---|---|
+| `AssetType.GRAPHICAL_ABSTRACT` ✅ | First-class asset type; exactly one per submission (bot-enforced) |
+| `StyleProfile` ✅ | Pluggable copyedit profile: `manual` (enum of 9), `cslStyle`, `rulesetKey`, `promptKey`, `houseRules[]`, `isDefault`, scoped to tenant and optionally one publication |
+| `StyleManual` enum ✅ | `INHOUSE, APA7, CHICAGO17, AMA11, MLA9, VANCOUVER, IEEE, CSE, HARVARD` |
+| `CopyEdit.styleManual`, `CopyEdit.botReport` ✅ | Which manual the bot ran; full JSON report for the dashboard |
+| `LayoutTemplate` ✅ | Ported publisher layout: `sourceFormat` (IDML/INDD/LATEX/PDF), `targetEngine` (SCRIBUS/LATEX), `sourceMinioKey`, `generatedMinioKey`, extracted `spec` JSON, `status` (DRAFT/PROCESSING/READY/FAILED), `isDefault` per publication/tenant |
+| `ProofQuery` ✅ | Numbered production query (`label` Q1, Q2…) with optional page + normalized pin position (`posX/posY` ∈ [0,1]); `status` OPEN → ANSWERED → RESOLVED |
+| `ProofCorrection` ✅ | Structured correction: `kind` (INSERT/DELETE/REPLACE/MOVE/QUERY_ANSWER/COMMENT), `targetText`/`newText`, `status` OPEN → ACCEPTED/REJECTED → APPLIED |
+
+Asset linkage rule ✅: intake writes `metadata.linkedToDeliverable = true` on SUPPLEMENTARY and GRAPHICAL_ABSTRACT assets. Publish-time consumers (portal, issue assembler, social bot) select assets by this flag + `assetType`.
+
+---
+
+## 4. Stage-by-Stage Bot Catalog
+
+### Stage 1 — Submission / Intake
+
+| Bot | Status | How it works |
+|---|---|---|
+| **Manuscript Normalizer** | ✅ | `submission.ts` fires `PANDOC:normalize-manuscript` on upload |
+| **File Classifier / Separator** | ✅ 🤖 | `processors/intake.ts`. Deterministic filename/MIME heuristics classify every file (manuscript / FIGURE / TABLE / SUPPLEMENTARY / GRAPHICAL_ABSTRACT / COVER) with confidence + reason. If no filename identifies a graphical abstract, AI vision reviews up to 6 figure candidates (≤5 MB each) and nominates one or none. Exactly one GA enforced (highest confidence wins; others demoted). Re-classifies existing `Asset` rows via `assetId` or creates new ones. Triggers: auto on `SUBMITTED` (orchestrator) or manual `asset.classifyIntake` mutation. |
+| **Format & Completeness Checker** | 🔜 | New job on `intake` queue: required sections (abstract, keywords, references), word/figure counts vs publication guidelines, file integrity. Result → submission metadata + author notification. |
+| **Plagiarism / Similarity Bot** | 🔜 | Crossref Similarity Check (iThenticate) or Copyleaks REST API; store score + report URL on submission; flag > threshold to editor. |
+| **AI Screening / Desk-Reject Triage** | 🔜 🤖 | Scope-fit vs publication description, quality red flags, paper-mill signals → structured recommendation for the desk editor (never auto-rejects). |
+| **Metadata Extraction Bot** | 🔜 🤖 | GROBID service + AI cleanup → title/authors/affiliations/ORCID/funding pre-fill. |
+| **Reference Validator** | 🔜 | Extend `lib/crossref.ts`: resolve each reference to a DOI, flag unresolvable + retracted (Retraction Watch data). |
+
+### Stage 2 — Peer Review
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Review Reminder Bot** | ✅ | `processors/scheduler.ts`, daily 08:00 UTC cron; reminds ≤3 days before due, marks OVERDUE, ≥6-day re-remind gap |
+| **Reviewer Matcher** | 🔜 🤖 | Rank tenant reviewers by keyword/abstract affinity; hard COI filters (co-authorship history, same affiliation) applied deterministically *before* AI ranking. |
+| **Review Quality Bot** | 🔜 🤖 | Score submitted reviews for completeness/constructiveness/tone before editor sees them. |
+| **Anonymizer Bot** | 🔜 | Strip author metadata + title-page identifiers from DOCX/PDF for double-blind review. |
+
+### Stage 3 — Author Revision
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Revision Diff Bot** | 🔜 | Pandoc → normalized text of v(n) vs v(n+1); render side-by-side diff; scaffold response-to-reviewers doc. |
+| **Rebuttal Coverage Checker** | 🔜 🤖 | Map each reviewer point to revision changes; list unaddressed points. |
+
+### Stage 4 — Approval / Editorial Decision
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Workflow-Transition Enforcement** | ✅ | `VALID_TRANSITIONS` enforced in every mutation; `advanceStatus` is the generic editor-driven transition |
+| **Decision Letter Generator** | 🔜 🤖 | Draft accept/revise/reject letters synthesizing review comments; editor edits before sending. |
+
+### Stage 5 — Copyediting
+
+| Bot | Status | How it works |
+|---|---|---|
+| **Style-Manual Engine** | ✅ 🤖 | `processors/copyedit.ts` + `lib/style-manuals.ts`. Three layers per manual: **(1) CSL** citation style key (consumed by Pandoc/citeproc), **(2) LanguageTool** language variant + enabled/disabled rule ids (40 k-char chunking, offsets re-based), **(3) AI guidance** — manual-specific mechanics prompt; in-house `houseRules[]` overlay OVERRIDES the manual on conflict. Pipeline: extract text (Pandoc → markdown, or raw for MD/LaTeX) → LT pass → AI pass (≤60 k chars, ≤60 suggested edits, `required|recommended` severity) → JSON report to `CopyEdit.botReport` + MinIO archive (`copyedit-reports/{submissionId}/{copyEditId}.json`) + `WorkflowLog`. Suggestions are review-only. |
+| **Profile resolution** | ✅ | Job `styleProfileId` > inline `styleManual` > publication default profile > tenant default > INHOUSE. Auto-run on copyeditor assignment; manual re-run via `copyEdit.runStyleBot`. |
+| **Grammar Check (interactive)** | ✅ | `grammar.check` tRPC → LanguageTool `:8082` (pre-existing) |
+| **Reference Styler** | 🔜 | Re-render reference list in the profile's CSL via Pandoc citeproc; needs `.bib`/CSL-JSON extraction first. |
+| **Adding a manual** | ✅ (procedure) | Add enum value (Prisma + Zod) + one entry in `STYLE_MANUALS` (label, cslStyle, lt config, aiGuidance). No engine changes. |
+
+Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, CSE, Harvard (en-GB), In-house.
+
+### Stage 6 — Author Review of Copyedits
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Author Query Bot** | 🔜 | Reuses `ProofQuery` model pattern at the copyedit stage; scheduler chases unanswered queries. |
+
+### Stage 7 — Artwork Processing
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Image QA Bot** | ✅ | `processors/image.ts`: DPI ≥300, color mode, ICC, thumbnails, web optimization |
+| **Alt-Text Generator** | 🔜 🤖 | Vision pass over approved figures → `Asset.altText` draft (accessibility + JATS `<alt-text>`); graphical abstract prioritized. |
+| **Vector Converter** | 🔜 | EPS/SVG → PDF/press-ready via penpot-exporter or Inkscape service. |
+| **Figure Permissions Checker** | 🔜 | Metadata/rules pass flagging third-party figures needing clearance. |
+
+### Stage 8 — Typesetting
+
+| Bot | Status | How it works |
+|---|---|---|
+| **LaTeX / Scribus / Pandoc composition** | ✅ | Existing processors; `typesetting.triggerJob` routes by engine |
+| **Template Porting Bot** | ✅ | `processors/template.ts` + `services/idml` + `lib/template-gen.ts`. **IDML path:** IDML (zip of XML) → Python extractor (`POST /extract`, port 4100, lxml) returns neutral spec: page W×H, margins, bleed, columns+gutter, fonts, named colors (CMYK/RGB), paragraph/character styles (font, size, leading, alignment, spacing, indents) — with safe defaults (A4, 20 mm) so generators never see nulls. Generator emits **Scribus `.sla`** (document geometry, master page, color + STYLE defs, main text frame with columns) or **LaTeX `.cls`** (geometry, xcolor definitions, fontspec main font, per-style `\styleXxx{}` macros, multicol setup). **LaTeX path:** publisher `.cls`/`.tex` stored as-is + geometry sniffed into `spec`. **INDD/PDF:** fail fast with actionable guidance (export IDML / request source). Output → `LayoutTemplate.generatedMinioKey`, status READY. ~80% fidelity target; designer finalizes once per journal. |
+| **Template consumption** | ✅ | `triggerJob` accepts `templateId` (or resolves publication/tenant default): LATEX → `.cls` shipped as compile `resource`, `documentClass` = normalized template name (must equal generator's `\ProvidesClass`); SCRIBUS → `templateMinioKey` + `contentMinioKey` (template mandatory for Scribus). |
+| **Preflight Bot** | 🔜 | veraPDF/Ghostscript service: PDF/X conformance, fonts embedded, bleed/trim boxes; blocks PROOF_REVIEW on failure. |
+| **Pagination QA Bot** | 🔜 | Parse LaTeX logs / Scribus output for overfull boxes, widows/orphans, overset text. |
+
+### Stage 9 — Proof Review (author + editor) ✅
+
+**Online Proof Workbench** — `apps/web/app/dashboard/submissions/[id]/proof/[reviewId]/page.tsx`, linked from the proof-review dashboard.
+
+- **Viewer:** typeset PDF via presigned MinIO URL in an iframe (browser-native rendering, zero deps). Upgrade path: pdf.js canvas + click-to-pin using the already-stored `posX/posY` normalized coordinates.
+- **Queries:** production staff (`EDITOR_IN_CHIEF, SECTION_EDITOR, COPY_EDITOR, TYPESETTER, PROOF_READER`) raise auto-labelled queries (Q1, Q2…); author or editor answers inline; staff mark RESOLVED.
+- **Corrections:** author/reviewer/editor mark structured corrections (kind, page, exact target text, replacement, note). Editors accept/reject; owner may delete while OPEN; everything locks once the proof review is SUBMITTED. REPLACE/DELETE require `targetText`; REPLACE/INSERT require `newText` (validated server-side).
+- **API:** `proofReview.workbench` (single aggregate query incl. presigned PDF URL + role flags), `addQuery`, `answerQuery`, `resolveQuery`, `addCorrection`, `setCorrectionStatus`, `deleteCorrection` — all tenant-scoped with role checks.
+- Existing round logic unchanged: all reviews submitted → APPROVED, any rejection → REVISION_REQUIRED.
+
+### Stage 10 — Correction Review / Application
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Correction Applier Bot** | 🔜 | Consumes ACCEPTED `ProofCorrection` rows: locate `targetText` in manuscript source, apply `newText`, mark APPLIED, re-enqueue typesetting, bump proof round. Unlocatable targets → flagged for manual application. This is the highest-value next bot: its entire input structure already exists. |
+
+### Stage 11 — XML & EPUB Generation
+
+| Bot | Status | Notes |
+|---|---|---|
+| **JATS / EPUB / HTML generation** | ✅ | Pandoc processor (`jats`, `epub3`, `html5` targets) |
+| **XML/EPUB Validator Bot** | 🔜 | New service (jing + JATS DTD, epubcheck); validation must pass before PUBLISHED. |
+
+### Stage 12 — Issue Compiling
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Issue router** | ✅ | Assign articles to issues, publish notifications |
+| **Issue Assembler Bot** | 🔜 | Order articles, generate ToC (graphical abstracts as thumbnails), front matter, continuous pagination, issue-level PDF via LaTeX/Scribus. |
+
+### Stage 13 — Upload & Publish
+
+| Bot | Status | Notes |
+|---|---|---|
+| **DOI Registration** | ✅ | `lib/crossref.ts` |
+| **PubMed Deposit** | ✅ | `lib/pubmed.ts` (FTP) |
+| **OAI-PMH / RSS / Portal** | ✅ | `routes/oai.ts`, `routes/rss.ts`, portal router. Portal must render deliverable-linked assets: supplementary files as separate downloads, graphical abstract on the landing page. |
+| **DOAJ / Archival (LOCKSS/Portico)** | 🔜 | Deposit adapters on a future `publish` queue. |
+
+### Stage 14 — POD
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Lulu POD** | ✅ | `lib/printod.ts` |
+| **Cover/Spine Bot** | 🔜 | Compute spine width from page count + paper weight; generate print-cover PDF from template. |
+
+### Stage 15 — Billing
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Billing router / Stripe** | ✅ | Existing |
+| **APC Invoice Bot** | 🔜 | Auto-invoice on ACCEPTED; waiver rules per tenant. |
+| **Dunning Bot** | 🔜 | Scheduler-pattern payment reminders. |
+
+### Stage 16 — Marketing & Social
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Lay-Summary / Press Bot** | 🔜 🤖 | Plain-language summary + press draft from title/abstract on PUBLISHED. |
+| **Social Post Bot** | 🔜 🤖 | Platform-sized post drafts (X/LinkedIn/Mastodon/Bluesky) + graphical abstract as media; human approves; platform APIs post. |
+| **Newsletter/Alert Bot** | 🔜 | Digest of newly published articles to subscribers (notification queue + RSS). |
+| **SEO/Scholar Meta** | 🔜 | Highwire/Dublin Core/schema.org tags on portal article pages. |
+
+### Additional stages (not in the original list)
+
+| Bot | Status | Notes |
+|---|---|---|
+| **Ethics & Compliance Bot** 🤖 | 🔜 | Ethics statements, trial registration, COI/funding disclosure checks at intake. |
+| **Data & Code Availability Bot** | 🔜 | Validate repository links/DOIs (Zenodo/Dryad/OSF). |
+| **AI-Content & Image-Integrity Bot** 🤖 | 🔜 | AI-text likelihood + figure-manipulation forensics; report-only. |
+| **License/Copyright Bot** | 🔜 | CC license selection, author agreement collection/tracking. |
+| **Post-Publication Bots** | 🔜 | Errata/retraction workflow, Crossmark updates, altmetrics tracking. |
+| **Accessibility Bot** | 🔜 | WCAG/PDF-UA checks on final outputs; consumes Alt-Text bot results. |
+
+---
+
+## 5. Job Schema Reference ✅ (`packages/types/src/jobs.ts`)
+
+```
+IntakeJob        { type:'INTAKE', submissionId, files[{minioKey, filename, mimeType,
+                   sizeBytes, uploadedById, assetId?}], useVision=true }
+CopyEditJob      { type:'COPYEDIT', submissionId, copyEditId, inputMinioKey,
+                   inputFormat: docx|markdown|latex|odt, styleProfileId?,
+                   styleManual=INHOUSE, cslStyle='apa', houseRules[], applyAi=true }
+TemplatePortJob  { type:'TEMPLATE_PORT', templateId, sourceMinioKey,
+                   sourceFormat: idml|indd|latex|pdf, targetEngine: SCRIBUS|LATEX }
+LatexJob         { ...existing, templateMinioKey?, templateClassName? }   // ported .cls support
+```
+
+Planned queues for 🔜 bots: `similarity`, `preflight`, `xmlvalidate`, `publish`, `marketing` — same recipe (schema + processor + Worker line).
+
+---
+
+## 6. External Services
+
+| Service | Port | Status | Used by |
+|---|---|---|---|
+| Pandoc (`services/pandoc`) | 5005 | ✅ | pandoc processor, copyedit text extraction |
+| LaTeX (`services/latex`) | 5003 | ✅ | latex processor. Accepts `source` **or** legacy `latex` key, optional `resources{filename:base64}` (ported `.cls`, `.bib`, logos — basename-sanitized), returns `{pdf, logs, errors[], metadata}` |
+| Scribus headless (`services/scribus`) | 5000 | ✅ | scribus processor (`.sla` + content JSON → PDF) |
+| **IDML extractor** (`services/idml`) | 4100 | ✅ | template processor. Flask+lxml, gunicorn; in docker-compose as `pubflow_idml` |
+| LanguageTool | 8082 | ✅ | grammar router, copyedit bot |
+| MinIO | 9000 | ✅ | all file storage |
+| Anthropic API | — | ✅ | `lib/ai.ts` (all 🤖 bots) |
+| GROBID, veraPDF, epubcheck | — | 🔜 | metadata extraction, preflight, XML validation |
+
+Worker env vars: `REDIS_URL`, `DATABASE_URL`, `MINIO_*`, `PANDOC_SERVICE_URL`, `LATEX_SERVICE_URL`, `IDML_SERVICE_URL`, `LANGUAGETOOL_URL`, `ANTHROPIC_*` (§2.2).
+
+---
+
+## 7. API Surface Added ✅
+
+| Router | Endpoints |
+|---|---|
+| `asset` | `classifyIntake` (author/editor; queues intake bot over all uploaded assets); `GRAPHICAL_ABSTRACT` accepted in upload/confirm/list enums |
+| `copyEdit` | `runStyleBot` (choose profile/manual, toggle AI); auto-dispatch on `assign` |
+| `styleProfile` | `list / create / update / delete` — one default per scope enforced transactionally |
+| `layoutTemplate` | `list / byId / getUploadUrl / create (queues port) / reprocess / getDownloadUrl / delete` |
+| `proofReview` | `workbench / addQuery / answerQuery / resolveQuery / addCorrection / setCorrectionStatus / deleteCorrection` |
+| `typesetting` | `triggerJob` gains `templateId`; Scribus jobs now correctly populated (template + content keys) |
+
+All new endpoints are tenant-scoped and role-checked (author vs production staff vs editor), consistent with existing router conventions.
+
+---
+
+## 8. Delivery Roadmap
+
+| Phase | Contents | Status |
+|---|---|---|
+| **A — Foundations + 4 flagship bots** | Queues, schema, AI client, intake classifier, style-manual engine, template porting, proof workbench, orchestrator | ✅ **Done (2026-07-05)** |
+| **B — Close the production loop** | Correction Applier (Stage 10), Preflight, XML/EPUB Validator, Issue Assembler | 🔜 next |
+| **C — Editorial intelligence** | Similarity check, reviewer matcher, AI screening, revision diff + rebuttal coverage, decision letters | 🔜 |
+| **D — Reach & compliance** | Alt-text, marketing/social/newsletter, SEO meta, DOAJ/archival, APC/dunning, ethics/data-availability/integrity, accessibility | 🔜 |
+
+**Recommended next step:** Correction Applier Bot — its input (`ProofCorrection` ACCEPTED rows) and output (typesetting re-run) are both already implemented, making it the shortest path to a fully closed proof-correction loop.
+
+---
+
+## 9. Operational Notes
+
+- **Prisma on Windows dev:** running dev servers lock the query-engine DLL → use `npx prisma generate --no-engine` for client-type updates. Always run `npx prisma` from `packages/db` (repo root resolves a newer Prisma with breaking CLI flags).
+- **Migrations:** produced via `prisma migrate diff --from-url <dev db> --to-schema-datamodel`, saved under `prisma/migrations/<ts>_<name>/migration.sql`, applied with `migrate deploy`.
+- **Bot failure semantics:** processor throws → BullMQ retries (3 attempts, exponential 5 s backoff) → failure recorded on the owning row (`Output.errorMessage`, `LayoutTemplate.errorMessage`, `CopyEdit.botReport.error`) — never only in logs.
+- **Token-cost bounds:** intake vision ≤6 images ≤5 MB each; copyedit AI ≤60 k chars, ≤60 edits, temperature 0.
+- **Idempotency:** intake re-classification updates existing assets (`assetId`); cron registration uses fixed `jobId`; report keys are deterministic per copyedit.

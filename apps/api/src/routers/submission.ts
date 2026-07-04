@@ -6,6 +6,7 @@ import { CreateSubmissionSchema, EditorialDecisionSchema,
          SubmissionStatusSchema, SubmissionStatus, isValidTransition } from '@pubflow/types'
 import { MinioStorage } from '../plugins/minio.js'
 import { QUEUES } from '@pubflow/types'
+import { dispatchStageBots } from '../lib/bot-dispatch.js'
 import { createHmac } from 'crypto'
 import { Client as MinioClient } from 'minio'
 
@@ -216,6 +217,9 @@ export const submissionRouter = router({
         type: 'NOTIFICATION', to: [], template: 'SUBMISSION_RECEIVED',
         data: { submissionId: sub.id, title: sub.title },
       })
+
+      // Stage bots: intake classifier separates supplementary/graphical-abstract files.
+      await dispatchStageBots(prisma, queues, sub.id, toStatus)
 
       return updated
     }),
@@ -748,7 +752,7 @@ export const submissionRouter = router({
       note: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { user, prisma } = ctx
+      const { user, prisma, queues } = ctx
       const sub = await prisma.submission.findFirst({
         where: { id: input.submissionId, tenantId: user.tenantId },
       })
@@ -756,7 +760,7 @@ export const submissionRouter = router({
       if (!isValidTransition(sub.status, input.toStatus))
         throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot transition from ${sub.status} to ${input.toStatus}` })
 
-      return prisma.submission.update({
+      const updated = await prisma.submission.update({
         where: { id: input.submissionId },
         data: {
           status: input.toStatus,
@@ -770,5 +774,10 @@ export const submissionRouter = router({
           },
         },
       })
+
+      // Stage bots owning the new status run automatically.
+      await dispatchStageBots(prisma, queues, input.submissionId, input.toStatus)
+
+      return updated
     }),
 })

@@ -55,7 +55,7 @@ export const assetRouter = router({
         submissionId: z.string().uuid(),
         filename: z.string().min(1),
         mimeType: z.string(),
-        assetType: z.enum(['FIGURE', 'TABLE', 'SUPPLEMENTARY', 'COVER']),
+        assetType: z.enum(['FIGURE', 'TABLE', 'SUPPLEMENTARY', 'GRAPHICAL_ABSTRACT', 'COVER']),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -89,7 +89,7 @@ export const assetRouter = router({
         filename: z.string().min(1),
         mimeType: z.string(),
         fileSizeBytes: z.number().min(1),
-        assetType: z.enum(['FIGURE', 'TABLE', 'SUPPLEMENTARY', 'COVER']),
+        assetType: z.enum(['FIGURE', 'TABLE', 'SUPPLEMENTARY', 'GRAPHICAL_ABSTRACT', 'COVER']),
         figureLabel: z.string().optional(),
         altText: z.string().optional(),
         caption: z.string().optional(),
@@ -147,6 +147,52 @@ export const assetRouter = router({
       return asset
     }),
 
+  // Run the intake classifier over all of a submission's uploaded files. It
+  // separates SUPPLEMENTARY material and the single GRAPHICAL_ABSTRACT and links
+  // them to the submission so they ride along with the final deliverable.
+  classifyIntake: protectedProcedure
+    .input(z.object({
+      submissionId: z.string().uuid(),
+      useVision: z.boolean().default(true),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const submission = await ctx.prisma.submission.findUniqueOrThrow({
+        where: { id: input.submissionId },
+      })
+
+      const isEditor = ['SUPER_ADMIN', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'ARTWORK_EDITOR'].includes(ctx.user.role)
+      if (submission.authorId !== ctx.user.id && !isEditor) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to classify this submission' })
+      }
+
+      const assets = await ctx.prisma.asset.findMany({
+        where: { submissionId: input.submissionId },
+        select: {
+          id: true, minioKey: true, filename: true,
+          mimeType: true, fileSizeBytes: true, uploadedById: true,
+        },
+      })
+      if (assets.length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No uploaded files to classify' })
+      }
+
+      await ctx.queues.intake.add('classify-intake', {
+        type: 'INTAKE',
+        submissionId: input.submissionId,
+        useVision: input.useVision,
+        files: assets.map((a) => ({
+          assetId: a.id,
+          minioKey: a.minioKey,
+          filename: a.filename,
+          mimeType: a.mimeType,
+          sizeBytes: a.fileSizeBytes,
+          uploadedById: a.uploadedById,
+        })),
+      })
+
+      return { queued: assets.length }
+    }),
+
   // Approve asset (editors only)
   approve: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
@@ -189,7 +235,7 @@ export const assetRouter = router({
   listAll: protectedProcedure
     .input(z.object({
       status: z.enum(['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED', 'NEEDS_REVISION']).optional(),
-      assetType: z.enum(['FIGURE', 'TABLE', 'SUPPLEMENTARY', 'COVER']).optional(),
+      assetType: z.enum(['FIGURE', 'TABLE', 'SUPPLEMENTARY', 'GRAPHICAL_ABSTRACT', 'COVER']).optional(),
       page: z.number().min(1).default(1),
       limit: z.number().min(1).max(100).default(20),
     }))
