@@ -9,6 +9,90 @@ import { QUEUES } from '@pubflow/types'
 import { createHmac } from 'crypto'
 import { Client as MinioClient } from 'minio'
 
+// ── Minimal DOCX generator (no external dependencies) ─────────────────────────
+// A DOCX is a ZIP (STORE, no compression) containing 4 XML files.
+// We build the ZIP binary from scratch using CRC-32 + local/central headers.
+
+function _crc32(buf: Buffer): number {
+  const t: number[] = []
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1
+    t[n] = c
+  }
+  let crc = 0xFFFFFFFF
+  for (const b of buf) crc = (crc >>> 8) ^ t[(crc ^ b) & 0xFF]
+  return (crc ^ 0xFFFFFFFF) >>> 0
+}
+
+function _zipLocal(name: string, data: Buffer): Buffer {
+  const n = Buffer.from(name), c = _crc32(data)
+  const h = Buffer.alloc(30 + n.length)
+  h.writeUInt32LE(0x04034B50,  0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0, 6)
+  h.writeUInt16LE(0,           8); h.writeUInt32LE(c, 14)
+  h.writeUInt32LE(data.length, 18); h.writeUInt32LE(data.length, 22)
+  h.writeUInt16LE(n.length,   26); n.copy(h, 30)
+  return Buffer.concat([h, data])
+}
+
+function _zipCentral(name: string, data: Buffer, offset: number): Buffer {
+  const n = Buffer.from(name), c = _crc32(data)
+  const h = Buffer.alloc(46 + n.length)
+  h.writeUInt32LE(0x02014B50,  0); h.writeUInt16LE(20, 4); h.writeUInt16LE(20, 6)
+  h.writeUInt32LE(c,          16); h.writeUInt32LE(data.length, 20)
+  h.writeUInt32LE(data.length, 24); h.writeUInt16LE(n.length, 28)
+  h.writeUInt32LE(offset,     42); n.copy(h, 46)
+  return h
+}
+
+function createBlankDocxBuffer(): Buffer {
+  const files: Array<[string, Buffer]> = [
+    ['[Content_Types].xml', Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>'
+    )],
+    ['_rels/.rels', Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>'
+    )],
+    ['word/document.xml', Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:body><w:p><w:r><w:t xml:space="preserve"> </w:t></w:r></w:p>' +
+      '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>' +
+      '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>' +
+      '</w:sectPr></w:body></w:document>'
+    )],
+    ['word/_rels/document.xml.rels', Buffer.from(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+    )],
+  ]
+
+  const locals: Buffer[] = [], centrals: Buffer[] = []
+  let off = 0
+  for (const [name, data] of files) {
+    const l = _zipLocal(name, data)
+    centrals.push(_zipCentral(name, data, off))
+    locals.push(l)
+    off += l.length
+  }
+  const cdir = Buffer.concat(centrals)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054B50,     0)
+  eocd.writeUInt16LE(files.length,   8)
+  eocd.writeUInt16LE(files.length,  10)
+  eocd.writeUInt32LE(cdir.length,   12)
+  eocd.writeUInt32LE(off,           16)
+  return Buffer.concat([...locals, cdir, eocd])
+}
+
 const FORMAT_TO_FILETYPE: Record<string, string> = {
   DOCX: 'docx', ODT: 'odt', RTF: 'rtf', PDF: 'pdf', MARKDOWN: 'txt',
 }
@@ -295,6 +379,51 @@ export const submissionRouter = router({
       return { success: true, manuscriptId: input.manuscriptId, outputId: output.id }
     }),
 
+  createBlankManuscript: protectedProcedure
+    .input(z.object({ submissionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma, minio } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
+
+      // Authors can only create for their own DRAFT; editors/admins can create for any
+      const isEditorialRole = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'SUPER_ADMIN'].includes(user.role)
+      if (!isEditorialRole && (sub.authorId !== user.id || sub.status !== 'DRAFT')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Can only open the editor for your own DRAFT submissions' })
+      }
+
+      const docxBuffer = createBlankDocxBuffer()
+      const filename   = `manuscript-${Date.now()}.docx`
+      const key        = MinioStorage.buildKey(user.tenantId, input.submissionId, filename)
+
+      await minio.putObject(
+        key,
+        docxBuffer,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      )
+
+      // Retire any previous "latest" version
+      await prisma.manuscript.updateMany({
+        where: { submissionId: input.submissionId, isLatest: true },
+        data:  { isLatest: false },
+      })
+
+      const ms = await prisma.manuscript.create({
+        data: {
+          submissionId:  input.submissionId,
+          format:        'DOCX',
+          minioPath:     `s3://pubflow-files/${key}`,
+          minioKey:      key,
+          fileSizeBytes: docxBuffer.length,
+          isLatest:      true,
+        },
+      })
+
+      return { manuscriptId: ms.id }
+    }),
+
   updateDraft: protectedProcedure
     .input(z.object({
       id: z.string().uuid(),
@@ -366,10 +495,26 @@ export const submissionRouter = router({
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
 
-      // Author can only edit their own DRAFT submissions
-      if (user.role === 'AUTHOR' && (sub.authorId !== user.id || sub.status !== 'DRAFT')) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot edit this submission' })
+      // Authors can only open their own submissions
+      if (user.role === 'AUTHOR' && sub.authorId !== user.id) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot access this submission' })
       }
+
+      // Determine whether the user can edit the document at this workflow stage.
+      // Read-only access is always granted to see the document.
+      const AUTHOR_EDIT_STATUSES    = ['DRAFT', 'REVISION_REQUIRED', 'REVISED']
+      const COPY_EDITOR_STATUSES    = ['COPY_EDITING', 'ARTWORK_PROCESSING', 'TYPESETTING', 'PROOF_REVIEW']
+      const EDITOR_EDIT_STATUSES    = ['SUBMITTED', 'DESK_REVIEW', 'PEER_REVIEW', 'REVISION_REQUIRED',
+                                       'REVISED', 'ACCEPTED', 'COPY_EDITING', 'ARTWORK_PROCESSING',
+                                       'TYPESETTING', 'PROOF_REVIEW', 'APPROVED']
+      const isAdmin  = user.role === 'SUPER_ADMIN'
+      const canEdit  =
+        isAdmin ||
+        (user.role === 'AUTHOR'            && sub.authorId === user.id && AUTHOR_EDIT_STATUSES.includes(sub.status)) ||
+        (user.role === 'COPY_EDITOR'       && COPY_EDITOR_STATUSES.includes(sub.status)) ||
+        (user.role === 'ARTWORK_EDITOR'    && ['ARTWORK_PROCESSING'].includes(sub.status)) ||
+        (user.role === 'TYPESETTER'        && ['TYPESETTING', 'PROOF_REVIEW'].includes(sub.status)) ||
+        (['SECTION_EDITOR', 'EDITOR_IN_CHIEF'].includes(user.role) && EDITOR_EDIT_STATUSES.includes(sub.status))
 
       // Get the latest manuscript
       const manuscript = await prisma.manuscript.findFirst({
@@ -384,27 +529,34 @@ export const submissionRouter = router({
       if (!fileType) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
-          message: `${manuscript.format} manuscripts cannot be edited in the browser editor. Please download the file instead.`,
+          message: `${manuscript.format} files cannot be opened in the browser editor. Use the download button to get the file.`,
         })
       }
 
-      // Generate a presigned URL using the MinIO host that OnlyOffice can reach.
-      // When OnlyOffice runs in Docker (tools network) it cannot reach `localhost:9000`;
-      // set ONLYOFFICE_MINIO_HOST=minio (Docker service name) in that case.
+      // Generate a presigned URL that OnlyOffice (running in Docker) can fetch.
+      // Node.js runs on the Windows host and cannot resolve Docker service names like "minio",
+      // so we must set region:'us-east-1' explicitly — without it, minio-js calls
+      // getBucketRegionAsync() which makes a real network request to the endPoint hostname,
+      // causing getaddrinfo ENOTFOUND when that hostname is a Docker-only DNS name.
+      // With region set, minio-js returns it immediately without any network call.
       const ooMinioHost = process.env.ONLYOFFICE_MINIO_HOST ?? process.env.MINIO_ENDPOINT ?? 'localhost'
       const ooMinioClient = new MinioClient({
-        endPoint: ooMinioHost,
-        port:     Number(process.env.MINIO_PORT ?? 9000),
-        useSSL:   process.env.MINIO_USE_SSL === 'true',
+        endPoint:  ooMinioHost,
+        port:      Number(process.env.MINIO_PORT ?? 9000),
+        useSSL:    process.env.MINIO_USE_SSL === 'true',
         accessKey: process.env.MINIO_ACCESS_KEY ?? '',
         secretKey: process.env.MINIO_SECRET_KEY ?? '',
+        region:    'us-east-1',
       })
-      const docUrl = await ooMinioClient.presignedGetObject(minio.bucket, manuscript.minioKey, 900)
+      const docUrl = await ooMinioClient.presignedGetObject(minio.bucket, manuscript.minioKey, 3600)
 
       // OnlyOffice caches documents by key; use manuscript.id so a new upload gets a fresh key.
       const docKey = manuscript.id.replace(/-/g, '')
 
-      const jwtSecret = process.env.ONLYOFFICE_JWT_SECRET || 'default-secret'
+      // Fallback matches docker-compose.yml's ${ONLYOFFICE_JWT_SECRET:-pubflow_onlyoffice_secret}
+      const jwtSecret    = process.env.ONLYOFFICE_JWT_SECRET || 'pubflow_onlyoffice_secret'
+      // ONLYOFFICE_CALLBACK_URL should point to the API using a host reachable from inside Docker
+      // (e.g. http://host.docker.internal:3001 on Windows/Mac)
       const callbackBase = process.env.ONLYOFFICE_CALLBACK_URL ?? process.env.API_URL ?? 'http://localhost:3001'
       const payload = {
         document: {
@@ -415,33 +567,59 @@ export const submissionRouter = router({
         },
         editorConfig: {
           callbackUrl: `${callbackBase}/wopi/callback/${input.submissionId}`,
+          mode: canEdit ? 'edit' : 'view',
           user: {
-            id: user.id,
-            name: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+            id:    user.id,
+            name:  `${user.firstName || ''} ${user.lastName || ''}`.trim(),
             email: user.email,
           },
           customization: {
-            autosave: true,
-            forcesave: false,
+            autosave:          true,
+            forcesave:         false,
             commentAuthorOnly: false,
           },
         },
         permissions: {
-          comment: true,
+          comment:  true,
           download: true,
-          edit: sub.status === 'DRAFT',
-          print: true,
-          review: false,
+          edit:     canEdit,
+          print:    true,
+          review:   false,
         },
       }
 
-      const token = signJwt(payload, jwtSecret)
+      // OnlyOffice v7.2+ requires the config to be wrapped in { payload: ... } in the JWT.
+      // Signing the raw config object causes "document security token is not correctly formed".
+      const token = signJwt({ payload }, jwtSecret)
 
       return {
         onlyofficeUrl: process.env.ONLYOFFICE_URL || 'http://localhost:8081',
-        config: payload,
+        config:        payload,
         token,
+        canEdit,
+        format: manuscript.format,
       }
+    }),
+
+  getManuscriptDownloadUrl: protectedProcedure
+    .input(z.object({ submissionId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { user, prisma, minio } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (user.role === 'AUTHOR' && sub.authorId !== user.id) throw new TRPCError({ code: 'FORBIDDEN' })
+
+      const manuscript = await prisma.manuscript.findFirst({
+        where: { submissionId: input.submissionId, isLatest: true },
+        orderBy: { uploadedAt: 'desc' },
+      })
+      if (!manuscript) throw new TRPCError({ code: 'NOT_FOUND', message: 'No manuscript uploaded yet' })
+
+      // Browser-accessible URL — use the public MinIO endpoint (localhost:9000)
+      const url = await minio.client.presignedGetObject(minio.bucket, manuscript.minioKey, 3600)
+      return { url, format: manuscript.format, filename: manuscript.minioKey.split('/').pop() ?? 'manuscript' }
     }),
 
   getManuscriptVersions: protectedProcedure

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp, Upload, PenLine } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { trpc } from '@/lib/trpc-client'
@@ -11,6 +11,7 @@ import { AssetUpload } from '@/components/ui/AssetUpload'
 import { Button } from '@/components/ui/Form'
 
 type AssetType = 'FIGURE' | 'TABLE' | 'SUPPLEMENTARY' | 'COVER'
+type ManuscriptMode = 'upload' | 'editor'
 
 const ASSET_TYPES: { type: AssetType; label: string; description: string }[] = [
   { type: 'FIGURE',        label: 'Figure',        description: 'Charts, graphs, photographs, diagrams' },
@@ -24,21 +25,33 @@ export default function UploadManuscriptPage() {
   const router = useRouter()
   const submissionId = params.id as string
 
-  const [manuscriptUploaded, setManuscriptUploaded] = useState(false)
-  const [artworkOpen,        setArtworkOpen]        = useState(false)
-  const [selectedAssetType,  setSelectedAssetType]  = useState<AssetType>('FIGURE')
-  const [assetCount,         setAssetCount]         = useState(0)
+  const [mode,              setMode]              = useState<ManuscriptMode>('upload')
+  const [manuscriptReady,   setManuscriptReady]   = useState(false)
+  const [artworkOpen,       setArtworkOpen]       = useState(false)
+  const [selectedAssetType, setSelectedAssetType] = useState<AssetType>('FIGURE')
+  const [assetCount,        setAssetCount]        = useState(0)
 
-  const submissionQ = trpc.submission.byId.useQuery({ id: submissionId })
-  const submitM     = trpc.submission.submit.useMutation()
+  const submissionQ        = trpc.submission.byId.useQuery({ id: submissionId })
+  const submitM            = trpc.submission.submit.useMutation()
+  const createBlankM       = trpc.submission.createBlankManuscript.useMutation()
 
   const sub = submissionQ.data
 
   const handleManuscriptComplete = async () => {
-    setManuscriptUploaded(true)
+    setManuscriptReady(true)
     setArtworkOpen(true)
     await submissionQ.refetch()
     toast.success('Manuscript saved. You can optionally upload artwork below.')
+  }
+
+  const handleOpenEditor = async () => {
+    try {
+      await createBlankM.mutateAsync({ submissionId })
+      toast.success('Blank document created — opening editor…')
+      router.push(`/dashboard/submissions/${submissionId}/edit`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not create blank document')
+    }
   }
 
   const handleAssetComplete = () => {
@@ -78,8 +91,8 @@ export default function UploadManuscriptPage() {
         >
           <ArrowLeft size={14} /> All submissions
         </Link>
-        <h1 className="text-2xl font-bold text-gray-900">Upload Files</h1>
-        <p className="text-sm text-gray-500 mt-1">Step 3 of 3 — attach your manuscript and optional artwork</p>
+        <h1 className="text-2xl font-bold text-gray-900">Attach Manuscript</h1>
+        <p className="text-sm text-gray-500 mt-1">Step 3 of 3 — upload a file or write directly in the editor</p>
         <div className="mt-3 w-full bg-gray-200 rounded-full h-1.5">
           <div className="bg-brand-500 h-1.5 rounded-full w-full" />
         </div>
@@ -117,35 +130,113 @@ export default function UploadManuscriptPage() {
       </div>
 
       {/* ── Section 1: Manuscript ── */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6">
-        <div className="flex items-center gap-2 mb-4">
-          <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${manuscriptUploaded ? 'bg-green-500 text-white' : 'bg-brand-500 text-white'}`}>
-            {manuscriptUploaded ? '✓' : '1'}
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        {/* Section header */}
+        <div className="flex items-center gap-2 px-6 pt-5 pb-4">
+          <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${manuscriptReady ? 'bg-green-500 text-white' : 'bg-brand-500 text-white'}`}>
+            {manuscriptReady ? '✓' : '1'}
           </div>
-          <h2 className="text-sm font-semibold text-gray-900">Manuscript File</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Manuscript</h2>
           <span className="ml-auto text-xs text-gray-400">Required</span>
         </div>
 
-        {manuscriptUploaded ? (
-          <div className="flex flex-col items-center gap-3 py-6 text-center">
+        {manuscriptReady ? (
+          <div className="px-6 pb-6 flex flex-col items-center gap-3 text-center">
             <CheckCircle className="h-12 w-12 text-green-500" />
             <div>
-              <p className="font-semibold text-gray-900">Manuscript uploaded</p>
-              <p className="text-sm text-gray-500 mt-1">Queued for normalisation processing.</p>
+              <p className="font-semibold text-gray-900">Manuscript ready</p>
+              <p className="text-sm text-gray-500 mt-1">
+                {mode === 'upload' ? 'Queued for normalisation processing.' : 'Open the editor to continue writing.'}
+              </p>
             </div>
-            <button
-              type="button"
-              className="text-xs text-brand-600 underline hover:no-underline"
-              onClick={() => setManuscriptUploaded(false)}
-            >
-              Replace with a different file
-            </button>
+            <div className="flex gap-2">
+              {mode === 'editor' && (
+                <Button size="sm" onClick={() => router.push(`/dashboard/submissions/${submissionId}/edit`)}>
+                  Continue in Editor
+                </Button>
+              )}
+              <button
+                type="button"
+                className="text-xs text-brand-600 underline hover:no-underline"
+                onClick={() => { setManuscriptReady(false) }}
+              >
+                Replace manuscript
+              </button>
+            </div>
           </div>
         ) : (
-          <FileUpload
-            submissionId={submissionId}
-            onUploadComplete={async () => { await handleManuscriptComplete() }}
-          />
+          <>
+            {/* Mode tabs */}
+            <div className="flex border-b border-gray-100 px-6">
+              <button
+                type="button"
+                onClick={() => setMode('upload')}
+                className={[
+                  'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
+                  mode === 'upload'
+                    ? 'border-brand-500 text-brand-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-700',
+                ].join(' ')}
+              >
+                <Upload size={14} />
+                Upload a File
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('editor')}
+                className={[
+                  'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
+                  mode === 'editor'
+                    ? 'border-brand-500 text-brand-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-700',
+                ].join(' ')}
+              >
+                <PenLine size={14} />
+                Create in Editor
+              </button>
+            </div>
+
+            {/* Upload mode */}
+            {mode === 'upload' && (
+              <div className="px-6 pb-6 pt-5">
+                <FileUpload
+                  submissionId={submissionId}
+                  onUploadComplete={async () => { await handleManuscriptComplete() }}
+                />
+              </div>
+            )}
+
+            {/* Create-in-editor mode */}
+            {mode === 'editor' && (
+              <div className="px-6 pb-6 pt-5 space-y-5">
+                <div className="rounded-xl border-2 border-dashed border-brand-200 bg-brand-50/40 p-8 text-center space-y-3">
+                  <div className="mx-auto h-14 w-14 rounded-full bg-brand-100 flex items-center justify-center">
+                    <PenLine className="h-7 w-7 text-brand-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">Write directly in OnlyOffice</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      A blank Word-compatible document opens in the browser editor.
+                      Your work is auto-saved and stored securely.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleOpenEditor}
+                    loading={createBlankM.isPending}
+                    disabled={createBlankM.isPending}
+                  >
+                    Open OnlyOffice Editor
+                  </Button>
+                </div>
+
+                <ul className="space-y-1.5 text-xs text-gray-500">
+                  <li className="flex items-start gap-2"><span className="text-brand-500 font-bold mt-0.5">✓</span>Auto-saves as you type — no data loss on browser close</li>
+                  <li className="flex items-start gap-2"><span className="text-brand-500 font-bold mt-0.5">✓</span>Full DOCX compatibility — download at any time</li>
+                  <li className="flex items-start gap-2"><span className="text-brand-500 font-bold mt-0.5">✓</span>Return here when finished to submit for review</li>
+                </ul>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -171,7 +262,6 @@ export default function UploadManuscriptPage() {
 
         {artworkOpen && (
           <div className="px-6 pb-6 space-y-4 border-t border-gray-100 pt-4">
-            {/* Asset type selector */}
             <div>
               <p className="text-xs font-medium text-gray-700 mb-2">Asset type</p>
               <div className="grid grid-cols-2 gap-2">
@@ -222,7 +312,7 @@ export default function UploadManuscriptPage() {
         </Button>
 
         <Button
-          disabled={!manuscriptUploaded || submitM.isPending}
+          disabled={!manuscriptReady || submitM.isPending}
           loading={submitM.isPending}
           onClick={handleSubmit}
         >
@@ -231,7 +321,10 @@ export default function UploadManuscriptPage() {
       </div>
 
       <p className="text-center text-xs text-gray-400">
-        Artwork can also be uploaded later from the submission detail page. A manuscript file is required before submitting.
+        {mode === 'editor'
+          ? 'Write in the editor, then return here to submit. Artwork can be added later.'
+          : 'Artwork can also be uploaded later from the submission detail page.'}
+        {' '}A manuscript is required before submitting.
       </p>
     </div>
   )

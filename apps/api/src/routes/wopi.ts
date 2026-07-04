@@ -152,7 +152,7 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
       const { submissionId } = req.params as { submissionId: string }
 
       // Verify OnlyOffice JWT if present
-      const jwtSecret = process.env.ONLYOFFICE_JWT_SECRET ?? 'default-secret'
+      const jwtSecret = process.env.ONLYOFFICE_JWT_SECRET ?? 'pubflow_onlyoffice_secret'
       const authHeader = req.headers['authorization']
       if (authHeader) {
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader

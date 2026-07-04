@@ -11,6 +11,33 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
 
+function ManuscriptVersionRow({ sub, ms, router }: { sub: any; ms: any; router: ReturnType<typeof useRouter> }) {
+  const downloadQ = trpc.submission.getManuscriptDownloadUrl.useQuery(
+    { submissionId: sub.id },
+    { enabled: false }
+  )
+  const handleDownload = async () => {
+    const result = await downloadQ.refetch()
+    if (result.data?.url) window.open(result.data.url, '_blank')
+    else toast.error('Could not get download link')
+  }
+  return (
+    <div className="flex items-center justify-between p-3 border border-gray-100 rounded-lg">
+      <div>
+        <div className="flex items-center gap-3">
+          <div className="font-medium">v{ms.version} {ms.isLatest ? <span className="text-xs text-gray-500">(latest)</span> : null}</div>
+          <div className="text-sm text-gray-500">{ms.format}</div>
+        </div>
+        <div className="text-sm text-gray-500">Uploaded {ms.createdAt ? formatDate(ms.createdAt) : '—'}</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="secondary" onClick={handleDownload} loading={downloadQ.isFetching}>↓</Button>
+        <Button size="sm" onClick={() => router.push(`/dashboard/submissions/${sub.id}/edit`)}>Open</Button>
+      </div>
+    </div>
+  )
+}
+
 const RECOMMENDATION_LABELS: Record<string, { label: string; color: string }> = {
   ACCEPT: { label: 'Accept', color: 'green' },
   MINOR_REVISION: { label: 'Minor revision', color: 'blue' },
@@ -88,19 +115,7 @@ export default function SubmissionDetailPage() {
             <div className="space-y-3">
               {(versionsQ.data && versionsQ.data.length > 0) ? (
                 versionsQ.data.map((ms: any) => (
-                  <div key={ms.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <div className="font-medium">v{ms.version} {ms.isLatest ? <span className="text-xs text-gray-500">(latest)</span> : null}</div>
-                        <div className="text-sm text-gray-500">{ms.format}</div>
-                      </div>
-                      <div className="text-sm text-gray-500">Uploaded {ms.createdAt ? formatDate(ms.createdAt) : '—'}</div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" onClick={() => router.push(`/dashboard/submissions/${sub.id}/edit`)}>Open</Button>
-                    </div>
-                  </div>
+                  <ManuscriptVersionRow key={ms.id} sub={sub} ms={ms} router={router} />
                 ))
               ) : (
                 <div className="p-4 text-sm text-gray-600">No manuscript versions uploaded yet.</div>

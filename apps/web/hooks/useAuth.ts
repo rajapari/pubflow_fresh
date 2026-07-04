@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import Keycloak from 'keycloak-js'
-import { saveAuthToken, clearAuthToken, getAuthToken } from '@/lib/auth'
+import { saveAuthToken, clearAuthToken, getAuthToken, getTokenExpiry, refreshAccessToken } from '@/lib/auth'
 
 let kc: Keycloak | null = null
 let kcInitialized = false
@@ -112,6 +112,25 @@ export function useAuth() {
     const isCallback = window.location.pathname === '/auth/callback'
 
     if (token && !isCallback) {
+      const exp = getTokenExpiry(token)
+      const expired = exp > 0 && Date.now() / 1000 > exp
+
+      if (expired) {
+        // Silently try to refresh before giving up
+        refreshAccessToken().then(fresh => {
+          const t = fresh ?? token
+          const claims = parseJwtPayload(t)
+          if (claims && fresh) {
+            const parsedUser = extractUserFromClaims(claims)
+            if (parsedUser) { setUser(parsedUser); setAuthed(true) }
+          } else {
+            clearAuthToken()
+          }
+          setReady(true)
+        })
+        return
+      }
+
       const claims = parseJwtPayload(token)
       if (claims) {
         const parsedUser = extractUserFromClaims(claims)

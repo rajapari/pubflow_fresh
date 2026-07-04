@@ -30,10 +30,12 @@ export default function EditSubmissionPage() {
   const submissionId = params.id as string
   const [activeTab, setActiveTab] = React.useState<'editor' | 'metadata'>('editor')
 
-  const submission = trpc.submission.byId.useQuery({ id: submissionId })
-  const editorConfig = trpc.submission.getManuscriptEditorUrl.useQuery({ submissionId })
+  const submission    = trpc.submission.byId.useQuery({ id: submissionId })
+  const editorConfig  = trpc.submission.getManuscriptEditorUrl.useQuery({ submissionId })
+  const downloadQ     = trpc.submission.getManuscriptDownloadUrl.useQuery({ submissionId }, { enabled: false })
   const updateMutation = trpc.submission.updateDraft.useMutation()
   const deleteMutation = trpc.submission.deleteDraft.useMutation()
+  const submitM        = trpc.submission.submit.useMutation()
   const submissionData = submission.data as any
 
   const {
@@ -85,22 +87,50 @@ export default function EditSubmissionPage() {
     }
   }
 
-  if (submission.isLoading || editorConfig.isLoading) return <div className="p-8">Loading...</div>
-  if (submission.data?.status !== 'DRAFT') {
-    return (
-      <div className="p-8 text-center">
-        <p className="text-red-600">This submission cannot be edited (status: {submission.data?.status})</p>
-        <Button onClick={() => router.back()} className="mt-4">Go Back</Button>
-      </div>
-    )
+  const canEdit    = editorConfig.data?.canEdit ?? false
+  const format     = editorConfig.data?.format ?? ''
+  const isEditorFormat = ['DOCX', 'ODT', 'RTF', 'PDF', 'MARKDOWN'].includes(format)
+  const isDraft    = submissionData?.status === 'DRAFT'
+  const hasManuscript = !!editorConfig.data
+
+  const handleDownload = async () => {
+    const result = await downloadQ.refetch()
+    if (result.data?.url) window.open(result.data.url, '_blank')
   }
+
+  const handleSubmitForReview = async () => {
+    if (!confirm('Submit this manuscript for editorial review? You will not be able to edit it until revisions are requested.')) return
+    try {
+      await submitM.mutateAsync({ id: submissionId })
+      toast.success('Manuscript submitted for review!')
+      router.push(`/dashboard/submissions/${submissionId}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to submit')
+    }
+  }
+
+  if (submission.isLoading || editorConfig.isLoading) return <div className="p-8">Loading...</div>
+
   if (editorConfig.error && !editorConfig.data) {
+    const msg = (editorConfig.error as any)?.message ?? ''
+    const isNoManuscript = msg.includes('No manuscript') || (editorConfig.error as any)?.data?.code === 'NOT_FOUND'
     return (
       <div className="p-8">
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-700">
-          <p className="font-medium">Editor Unavailable</p>
-          <p className="text-sm">Please upload a manuscript first or check your OnlyOffice setup.</p>
-          <Button onClick={() => router.back()} className="mt-4">Go Back</Button>
+          <p className="font-medium">{isNoManuscript ? 'No Manuscript Uploaded' : 'Editor Unavailable'}</p>
+          <p className="text-sm mt-1">
+            {isNoManuscript
+              ? 'Upload a manuscript file first from the submission page.'
+              : 'Unable to open the document editor. Check that OnlyOffice is running.'}
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button onClick={() => router.back()}>Go Back</Button>
+            {!isNoManuscript && (
+              <Button variant="secondary" onClick={handleDownload} loading={downloadQ.isFetching}>
+                Download File
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     )
@@ -134,12 +164,45 @@ export default function EditSubmissionPage() {
       </div>
 
       {activeTab === 'editor' && editorConfig.data && (
-        <div className="min-h-[600px] mb-8">
-          <OnlyOfficeEditor
-            onlyofficeUrl={editorConfig.data.onlyofficeUrl}
-            config={editorConfig.data.config}
-            token={editorConfig.data.token}
-          />
+        <div className="mb-8 space-y-3">
+          {/* Status bar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {canEdit
+                ? <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">Editing enabled</span>
+                : <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">View only — editing not available at this workflow stage</span>
+              }
+              <span className="text-xs text-gray-400">{format}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {isDraft && hasManuscript && (
+                <Button size="sm" onClick={handleSubmitForReview} loading={submitM.isPending}>
+                  Submit for Review
+                </Button>
+              )}
+              <Button size="sm" variant="secondary" onClick={handleDownload} loading={downloadQ.isFetching}>
+                ↓ Download
+              </Button>
+            </div>
+          </div>
+
+          {isEditorFormat ? (
+            <div className="min-h-[600px]">
+              <OnlyOfficeEditor
+                onlyofficeUrl={editorConfig.data.onlyofficeUrl}
+                config={editorConfig.data.config}
+                token={editorConfig.data.token}
+              />
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+              <p className="font-medium text-amber-800">Browser editor not available for {format} files</p>
+              <p className="text-sm text-amber-700 mt-1">Download the file to open it in a desktop application.</p>
+              <Button className="mt-4" onClick={handleDownload} loading={downloadQ.isFetching}>
+                Download {format} File
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

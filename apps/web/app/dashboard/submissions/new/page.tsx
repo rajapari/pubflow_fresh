@@ -11,10 +11,13 @@ import { useRouter } from 'next/navigation'
 import { AlertCircle } from 'lucide-react'
 
 const CreateSubmissionSchema = z.object({
-  publicationId: z.string().uuid('Please select a publication'),
-  title:    z.string().min(10, 'Title must be at least 10 characters').max(500),
-  abstract: z.string().min(50, 'Abstract must be at least 50 characters').max(5000).optional(),
-  keywords: z.array(z.string().min(2).max(50)).min(1, 'Add at least one keyword').max(10),
+  publicationId: z.string().min(1, 'Please select a publication').uuid('Please select a publication'),
+  title:    z.string().min(1, 'Title is required').min(10, 'Title must be at least 10 characters').max(500),
+  abstract: z.preprocess(
+    v => (v === '' ? undefined : v),
+    z.string().min(50, 'Abstract must be at least 50 characters').max(5000).optional()
+  ),
+  keywords: z.array(z.string().min(2, 'Keywords must be at least 2 characters').max(50)).min(1, 'Add at least one keyword').max(10),
   coAuthors: z.array(z.object({
     name:        z.string().min(1, 'Name required'),
     email:       z.string().email('Valid email required'),
@@ -81,7 +84,7 @@ export default function NewSubmissionPage() {
 
   const handleAddKeyword = () => {
     const kw = keywordInput.trim()
-    if (kw && keywords.length < 10) {
+    if (kw.length >= 2 && keywords.length < 10) {
       setValue('keywords', [...keywords, kw], { shouldValidate: true })
       setKeywordInput('')
     }
@@ -146,6 +149,31 @@ export default function NewSubmissionPage() {
               disabled={publications.isLoading}
               required
             />
+            {publications.isLoading && (
+              <p className="text-xs text-gray-400 animate-pulse">Loading publications…</p>
+            )}
+            {!publications.isLoading && publications.data?.length === 0 && (
+              <p className="text-xs text-amber-600">No publications found. Please contact your administrator.</p>
+            )}
+
+            {/* Journal info card */}
+            {selectedPubId && selectedPub.data && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-semibold text-gray-800">{(selectedPub.data as any).title}</p>
+                  <span className="shrink-0 text-xs text-gray-400 uppercase tracking-wide">{(selectedPub.data as any).type}</span>
+                </div>
+                {((selectedPub.data as any).issn || (selectedPub.data as any).isbn) && (
+                  <p className="text-xs text-gray-500">
+                    {(selectedPub.data as any).issn ? `ISSN ${(selectedPub.data as any).issn}` : `ISBN ${(selectedPub.data as any).isbn}`}
+                  </p>
+                )}
+                {(selectedPub.data as any).description && (
+                  <p className="text-xs text-gray-600">{(selectedPub.data as any).description}</p>
+                )}
+              </div>
+            )}
+
             {/* Submission guidelines for the selected publication */}
             {selectedPubId && (selectedPub.data as any)?.submissionGuidelines && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -199,15 +227,15 @@ export default function NewSubmissionPage() {
                     if (e.key === 'Enter') { e.preventDefault(); handleAddKeyword() }
                   }}
                 />
-                <Button type="button" onClick={handleAddKeyword} disabled={!keywordInput.trim() || keywords.length >= 10}>
+                <Button type="button" onClick={handleAddKeyword} disabled={keywordInput.trim().length < 2 || keywords.length >= 10}>
                   Add
                 </Button>
               </div>
 
-              {errors.keywords && (
+              {(errors.keywords?.message || (errors.keywords as any)?.root?.message) && (
                 <div className="mt-1.5 flex items-center gap-1 text-xs text-red-600">
                   <AlertCircle size={12} />
-                  {errors.keywords.message ?? errors.keywords.root?.message}
+                  {errors.keywords?.message ?? (errors.keywords as any)?.root?.message}
                 </div>
               )}
 

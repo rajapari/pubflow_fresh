@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { router, publicProcedure, protectedProcedure, chiefEditorProcedure, adminProcedure } from '../trpc/procedures.js'
 import { QUEUES } from '@pubflow/types'
 import { createKeycloakUser } from '../lib/keycloak-admin.js'
+import { DEFAULT_PUBLICATIONS } from '../lib/default-publications.js'
 
 export const publicationRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
@@ -149,8 +150,22 @@ export const tenantRouter = router({
             firstName: input.firstName,
             lastName:  input.lastName,
             role:      'EDITOR_IN_CHIEF',
-            status:    'INVITED',
+            status:    'ACTIVE',
           },
+        })
+        // Seed the full catalogue of well-known publications so new tenants
+        // have a populated dropdown immediately without manual setup.
+        await tx.publication.createMany({
+          data: DEFAULT_PUBLICATIONS.map(p => ({
+            tenantId:    tenant.id,
+            title:       p.title,
+            type:        p.type as any,
+            issn:        'issn' in p ? (p.issn || undefined) : undefined,
+            isbn:        'isbn' in p ? (p.isbn || undefined) : undefined,
+            description: p.description,
+            status:      'ACTIVE',
+          })),
+          skipDuplicates: true,
         })
         return { tenant, user }
       })

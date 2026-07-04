@@ -1,11 +1,20 @@
 'use client'
 import { useEffect } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { TopBar } from '@/components/layout/TopBar'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { ready, authed } = useAuth()
+  const router   = useRouter()
+  const pathname = usePathname()
+
+  useEffect(() => {
+    if (ready && !authed) {
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`)
+    }
+  }, [ready, authed, router, pathname])
 
   if (!ready) return (
     <div className="flex h-screen items-center justify-center">

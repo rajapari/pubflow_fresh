@@ -5,66 +5,41 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Header } from '@/components/Header'
 import { Footer } from '@/components/Footer'
-import { ArrowRight, Mail, Lock, User, Check } from 'lucide-react'
+import { ArrowRight, Mail, Lock, User, Check, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { saveAuthToken } from '@/lib/auth'
 
 export default function SignupPage() {
   const router = useRouter()
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    agree: false,
+    name: '', email: '', password: '', confirmPassword: '', agree: false,
   })
-  const [isLoading, setIsLoading] = useState(false)
+  const [showPw,        setShowPw]        = useState(false)
+  const [showConfirmPw, setShowConfirmPw] = useState(false)
+  const [isLoading,     setIsLoading]     = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, type, checked, value } = e.target
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }))
+    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // Validation
-    if (!formData.name.trim()) {
-      toast.error('Please enter your name')
-      return
-    }
-    if (!formData.email.includes('@')) {
-      toast.error('Please enter a valid email')
-      return
-    }
-    if (formData.password.length < 8) {
-      toast.error('Password must be at least 8 characters')
-      return
-    }
-    if (formData.password !== formData.confirmPassword) {
-      toast.error('Passwords do not match')
-      return
-    }
-    if (!formData.agree) {
-      toast.error('Please accept the terms and conditions')
-      return
-    }
+    if (!formData.name.trim())                    { toast.error('Please enter your name');              return }
+    if (!formData.email.includes('@'))             { toast.error('Please enter a valid email');          return }
+    if (formData.password.length < 8)             { toast.error('Password must be at least 8 characters'); return }
+    if (formData.password !== formData.confirmPassword) { toast.error('Passwords do not match');        return }
+    if (!formData.agree)                           { toast.error('Please accept the terms and conditions'); return }
 
     setIsLoading(true)
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
+      const res  = await fetch('/api/auth/register', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: formData.name, email: formData.email, password: formData.password }),
+        body:    JSON.stringify({ name: formData.name, email: formData.email, password: formData.password }),
       })
       const data = await res.json()
-      if (!res.ok) {
-        toast.error(data.error ?? 'Registration failed')
-        return
-      }
+      if (!res.ok) { toast.error(data.error ?? 'Registration failed'); return }
       saveAuthToken(data.token)
       toast.success('Account created successfully!')
       router.push('/dashboard')
@@ -75,189 +50,157 @@ export default function SignupPage() {
     }
   }
 
-  const handleOAuthSignup = (provider: 'keycloak' | 'google' | 'github') => {
+  const handleOAuthSignup = () => {
     setIsLoading(true)
-    const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL || 'http://localhost:8080'
-    const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM || 'pubflow'
-    const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
+    const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL    || 'http://localhost:8080'
+    const realm       = process.env.NEXT_PUBLIC_KEYCLOAK_REALM  || 'pubflow'
+    const clientId    = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
     const redirectUri = `${window.location.origin}/auth/callback`
-
-    const oauthUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&response_mode=query&scope=openid&kc_action=register`
-    window.location.href = oauthUrl
+    window.location.href = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&response_mode=query&scope=openid&kc_action=register`
   }
 
   return (
     <>
       <Header isAuthenticated={false} />
-      
+
       <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
-          {/* Signup Card */}
           <div className="rounded-2xl bg-white p-8 shadow-xl">
             <div className="mb-8 text-center">
               <h1 className="text-3xl font-bold text-gray-900">Create Account</h1>
               <p className="mt-2 text-gray-600">Join PubFlow and streamline your publishing</p>
             </div>
 
-            {/* OAuth Buttons */}
-            <div className="space-y-3 mb-6">
-              <button
-                onClick={() => handleOAuthSignup('keycloak')}
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2 rounded-lg border-2 border-gray-300 bg-white px-4 py-3 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0z" />
-                </svg>
-                Sign up with SSO
-              </button>
-            </div>
+            {/* SSO */}
+            <button
+              onClick={handleOAuthSignup}
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-2 rounded-lg border-2 border-gray-300 bg-white px-4 py-3 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-6"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0z" />
+              </svg>
+              Sign up with SSO
+            </button>
 
-            {/* Divider */}
             <div className="mb-6 flex items-center">
               <div className="flex-1 border-t border-gray-200" />
               <span className="px-3 text-sm text-gray-500">Or sign up with email</span>
               <div className="flex-1 border-t border-gray-200" />
             </div>
 
-            {/* Signup Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Name */}
               <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-                  Full Name
-                </label>
+                <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                 <div className="relative">
                   <User className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
                   <input
-                    id="name"
-                    type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleChange}
-                    placeholder="John Doe"
-                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-20"
-                    required
+                    id="name" name="name" type="text" value={formData.name}
+                    onChange={handleChange} placeholder="John Doe" required
+                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
 
+              {/* Email */}
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Address
-                </label>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
                   <input
-                    id="email"
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    placeholder="you@example.com"
-                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-20"
-                    required
+                    id="email" name="email" type="email" value={formData.email}
+                    onChange={handleChange} placeholder="you@example.com" required
+                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
 
+              {/* Password */}
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                  Password
-                </label>
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
                   <input
-                    id="password"
-                    type="password"
-                    name="password"
-                    value={formData.password}
-                    onChange={handleChange}
-                    placeholder="••••••••"
-                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-20"
-                    required
+                    id="password" name="password" value={formData.password}
+                    type={showPw ? 'text' : 'password'}
+                    onChange={handleChange} placeholder="••••••••" required
+                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-10 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
+                  <button type="button" onClick={() => setShowPw(v => !v)} tabIndex={-1}
+                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+                    aria-label={showPw ? 'Hide password' : 'Show password'}>
+                    {showPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
                 <p className="mt-1 text-xs text-gray-500">At least 8 characters</p>
               </div>
 
+              {/* Confirm Password */}
               <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                  Confirm Password
-                </label>
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
                   <input
-                    id="confirmPassword"
-                    type="password"
-                    name="confirmPassword"
-                    value={formData.confirmPassword}
-                    onChange={handleChange}
-                    placeholder="••••••••"
-                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-20"
-                    required
+                    id="confirmPassword" name="confirmPassword" value={formData.confirmPassword}
+                    type={showConfirmPw ? 'text' : 'password'}
+                    onChange={handleChange} placeholder="••••••••" required
+                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-10 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
+                  <button type="button" onClick={() => setShowConfirmPw(v => !v)} tabIndex={-1}
+                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+                    aria-label={showConfirmPw ? 'Hide password' : 'Show password'}>
+                    {showConfirmPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
+                {formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                  <p className="mt-1 text-xs text-red-500">Passwords do not match</p>
+                )}
               </div>
 
+              {/* Terms */}
               <div className="flex items-start gap-2">
                 <input
-                  id="agree"
-                  type="checkbox"
-                  name="agree"
-                  checked={formData.agree}
-                  onChange={handleChange}
+                  id="agree" name="agree" type="checkbox" checked={formData.agree}
+                  onChange={handleChange} required
                   className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                  required
                 />
                 <label htmlFor="agree" className="text-sm text-gray-600 cursor-pointer">
                   I agree to the{' '}
-                  <Link href="/terms" className="font-medium text-blue-600 hover:text-blue-700">
-                    Terms of Service
-                  </Link>{' '}
-                  and{' '}
-                  <Link href="/privacy" className="font-medium text-blue-600 hover:text-blue-700">
-                    Privacy Policy
-                  </Link>
+                  <Link href="/terms" className="font-medium text-blue-600 hover:text-blue-700">Terms of Service</Link>
+                  {' '}and{' '}
+                  <Link href="/privacy" className="font-medium text-blue-600 hover:text-blue-700">Privacy Policy</Link>
                 </label>
               </div>
 
               <button
-                type="submit"
-                disabled={isLoading}
+                type="submit" disabled={isLoading}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-2.5 font-medium text-white hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
               >
-                {isLoading ? 'Creating account...' : 'Create Account'}
+                {isLoading ? 'Creating account…' : 'Create Account'}
                 {!isLoading && <ArrowRight className="h-4 w-4" />}
               </button>
             </form>
 
-            {/* Sign In Link */}
             <div className="mt-6 text-center">
               <p className="text-gray-600">
                 Already have an account?{' '}
-                <Link href="/login" className="font-medium text-blue-600 hover:text-blue-700">
-                  Sign in
-                </Link>
+                <Link href="/login" className="font-medium text-blue-600 hover:text-blue-700">Sign in</Link>
               </p>
             </div>
           </div>
 
-          {/* Feature Highlight */}
-          <div className="mt-8 rounded-lg bg-white bg-opacity-60 backdrop-blur p-4">
-            <div className="space-y-2">
-              <div className="flex gap-2 text-sm text-gray-700">
+          <div className="mt-8 rounded-lg bg-white/60 backdrop-blur p-4 space-y-2">
+            {[
+              '14-day free trial. No credit card required.',
+              'Access all features from day one',
+              'Cancel anytime',
+            ].map(text => (
+              <div key={text} className="flex gap-2 text-sm text-gray-700">
                 <Check className="h-4 w-4 text-green-600 flex-shrink-0" />
-                <span>14-day free trial. No credit card required.</span>
+                <span>{text}</span>
               </div>
-              <div className="flex gap-2 text-sm text-gray-700">
-                <Check className="h-4 w-4 text-green-600 flex-shrink-0" />
-                <span>Access all features from day one</span>
-              </div>
-              <div className="flex gap-2 text-sm text-gray-700">
-                <Check className="h-4 w-4 text-green-600 flex-shrink-0" />
-                <span>Cancel anytime</span>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       </main>

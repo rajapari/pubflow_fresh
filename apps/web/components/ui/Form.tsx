@@ -7,8 +7,8 @@ interface FormFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   helperText?: string
 }
 
-export function FormField({ label, error, helperText, className, ...props }: FormFieldProps) {
-  return (
+export const FormField = React.forwardRef<HTMLInputElement, FormFieldProps>(
+  ({ label, error, helperText, className, ...props }, ref) => (
     <div className="space-y-1">
       <label className="block text-sm font-medium text-gray-700">
         {label}
@@ -16,6 +16,7 @@ export function FormField({ label, error, helperText, className, ...props }: For
       </label>
       <input
         {...props}
+        ref={ref}
         className={cn(
           'w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500',
           error ? 'border-red-500 bg-red-50' : 'border-gray-300',
@@ -26,7 +27,8 @@ export function FormField({ label, error, helperText, className, ...props }: For
       {helperText && !error && <p className="text-sm text-gray-500">{helperText}</p>}
     </div>
   )
-}
+)
+FormField.displayName = 'FormField'
 
 interface TextAreaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   label: string
@@ -34,8 +36,8 @@ interface TextAreaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
   helperText?: string
 }
 
-export function TextArea({ label, error, helperText, className, ...props }: TextAreaProps) {
-  return (
+export const TextArea = React.forwardRef<HTMLTextAreaElement, TextAreaProps>(
+  ({ label, error, helperText, className, ...props }, ref) => (
     <div className="space-y-1">
       <label className="block text-sm font-medium text-gray-700">
         {label}
@@ -43,6 +45,7 @@ export function TextArea({ label, error, helperText, className, ...props }: Text
       </label>
       <textarea
         {...props}
+        ref={ref}
         className={cn(
           'w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500',
           error ? 'border-red-500 bg-red-50' : 'border-gray-300',
@@ -53,7 +56,8 @@ export function TextArea({ label, error, helperText, className, ...props }: Text
       {helperText && !error && <p className="text-sm text-gray-500">{helperText}</p>}
     </div>
   )
-}
+)
+TextArea.displayName = 'TextArea'
 
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label: string
@@ -61,8 +65,8 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   options: Array<{ value: string; label: string }>
 }
 
-export function Select({ label, error, options, className, ...props }: SelectProps) {
-  return (
+export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
+  ({ label, error, options, className, ...props }, ref) => (
     <div className="space-y-1">
       <label className="block text-sm font-medium text-gray-700">
         {label}
@@ -70,6 +74,7 @@ export function Select({ label, error, options, className, ...props }: SelectPro
       </label>
       <select
         {...props}
+        ref={ref}
         className={cn(
           'w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500',
           error ? 'border-red-500 bg-red-50' : 'border-gray-300',
@@ -86,7 +91,8 @@ export function Select({ label, error, options, className, ...props }: SelectPro
       {error && <p className="text-sm text-red-600">{error}</p>}
     </div>
   )
-}
+)
+Select.displayName = 'Select'
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'outline'
@@ -96,10 +102,10 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 export function Button({ variant = 'primary', size = 'md', loading, children, className, ...props }: ButtonProps) {
   const variantClasses = {
-    primary: 'bg-blue-600 text-white hover:bg-blue-700',
+    primary:   'bg-blue-600 text-white hover:bg-blue-700',
     secondary: 'bg-gray-200 text-gray-900 hover:bg-gray-300',
-    danger: 'bg-red-600 text-white hover:bg-red-700',
-    outline: 'border-2 border-gray-300 text-gray-900 hover:bg-gray-50',
+    danger:    'bg-red-600 text-white hover:bg-red-700',
+    outline:   'border-2 border-gray-300 text-gray-900 hover:bg-gray-50',
   }
 
   const sizeClasses = {

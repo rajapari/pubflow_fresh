@@ -276,6 +276,7 @@ model Publication {
   submissions Submission[]
   issues      Issue[]
 
+  @@unique([tenantId, title])
   @@index([tenantId])
   @@map("publications")
 }
