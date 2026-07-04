@@ -21,18 +21,18 @@ interface OnlyOfficeEditorProps {
       key: string
       title: string
       url: string
+      permissions: {
+        comment: boolean
+        download: boolean
+        edit: boolean
+        print: boolean
+        review: boolean
+      }
     }
     editorConfig: {
       callbackUrl: string
       user: { id: string; name: string; email: string }
       customization: { autosave: boolean; forcesave: boolean; commentAuthorOnly: boolean }
-    }
-    permissions: {
-      comment: boolean
-      download: boolean
-      edit: boolean
-      print: boolean
-      review: boolean
     }
   }
   token: string
@@ -52,7 +52,16 @@ export function OnlyOfficeEditor({ onlyofficeUrl, config, token }: OnlyOfficeEdi
     function initEditor() {
       if (!containerRef.current || !window.DocsAPI) return
       try {
-        editorRef.current = new window.DocsAPI.DocEditor(containerId, { ...config, token })
+        editorRef.current = new window.DocsAPI.DocEditor(containerId, {
+          ...config,
+          token,
+          // Fill the container and force the full desktop UI (complete toolbar,
+          // menus, plugins) instead of the reduced embedded/mobile layout the
+          // editor falls back to when no type/size is given.
+          type:   'desktop',
+          width:  '100%',
+          height: '100%',
+        })
         setIsLoading(false)
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to initialize editor'
@@ -106,20 +115,20 @@ export function OnlyOfficeEditor({ onlyofficeUrl, config, token }: OnlyOfficeEdi
   }
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-lg overflow-hidden shadow">
+    <div className="h-full w-full bg-white rounded-lg overflow-hidden shadow">
       {isLoading && (
-        <div className="flex items-center justify-center h-96 bg-gray-50">
+        <div className="flex items-center justify-center h-full bg-gray-50">
           <div className="text-center">
             <div className="inline-block h-10 w-10 animate-spin rounded-full border-b-2 border-brand-500" />
             <p className="mt-4 text-sm text-gray-600">Loading editor…</p>
           </div>
         </div>
       )}
+      {/* DocsAPI replaces this div with the editor iframe; it inherits 100% of the wrapper */}
       <div
         ref={containerRef}
         id={CONTAINER_ID}
-        className={isLoading ? 'hidden' : 'flex-1'}
-        style={{ minHeight: '600px' }}
+        className={isLoading ? 'hidden' : 'h-full w-full'}
       />
     </div>
   )

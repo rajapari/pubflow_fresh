@@ -9,7 +9,8 @@ export type SubmissionStatus = z.infer<typeof SubmissionStatusSchema>
 
 export const VALID_TRANSITIONS: Record<SubmissionStatus, SubmissionStatus[]> = {
   DRAFT:              ['SUBMITTED','WITHDRAWN'],
-  SUBMITTED:          ['DESK_REVIEW','REJECTED','WITHDRAWN'],
+  // DRAFT: author may reopen a submission for revision until editorial review begins
+  SUBMITTED:          ['DRAFT','DESK_REVIEW','REJECTED','WITHDRAWN'],
   DESK_REVIEW:        ['PEER_REVIEW','REVISION_REQUIRED','REJECTED'],
   PEER_REVIEW:        ['REVISION_REQUIRED','ACCEPTED','REJECTED'],
   REVISION_REQUIRED:  ['REVISED','WITHDRAWN'],

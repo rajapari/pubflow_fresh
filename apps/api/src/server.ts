@@ -21,6 +21,10 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 
 export async function buildServer() {
   const app = Fastify({
+    // tRPC batches procedures into one comma-separated path segment
+    // (e.g. "a.byId,a.versions,b.list,…"); the router's default
+    // maxParamLength of 100 silently 404s any batch longer than that.
+    maxParamLength: 5000,
     // Use simple logger — no pino-pretty transport needed
     pluginTimeout: 60000,
     logger: {
@@ -38,6 +42,11 @@ export async function buildServer() {
 
   // Register sensible (adds httpErrors used in auth plugin)
   await app.register(sensible)
+
+  // NOTE: do NOT register @fastify/compress here — it breaks the tRPC fastify
+  // adapter (the adapter replies with a fetch Response object that compress
+  // cannot serialize, turning every browser request into a 500). Response
+  // compression belongs in the reverse proxy (nginx / k8s ingress gzip).
 
   // Security
   await app.register(helmet, { contentSecurityPolicy: false })

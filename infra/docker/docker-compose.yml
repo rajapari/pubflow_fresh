@@ -113,6 +113,10 @@ services:
     environment:
       JWT_ENABLED: "true"
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-pubflow_onlyoffice_secret}
+      # Send the outgoing JWT in a custom header. With the default "Authorization"
+      # header, S3/MinIO presigned downloads fail with 400 "request has multiple
+      # authentication types" because the URL already carries query-string auth.
+      JWT_HEADER: AuthorizationJwt
     ports:
       - "8081:80"
     networks: [tools, app]

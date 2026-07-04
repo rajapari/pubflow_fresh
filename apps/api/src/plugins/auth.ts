@@ -49,6 +49,10 @@ async function fetchPublicKeyWithRetry(logger: FastifyInstance['log']): Promise<
   return null
 }
 
+// Tenants confirmed to have publications — lets us skip the lazy-seed COUNT
+// query on every authenticated request after the first one per tenant.
+const seededTenants = new Set<string>()
+
 export const authPlugin = fp(async (app: FastifyInstance) => {
   const publicKey = await fetchPublicKeyWithRetry(app.log)
 
@@ -150,7 +154,6 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
       }
 
       // Activate INVITED users on first successful Keycloak login
-      // Activate INVITED users on first successful Keycloak login
       if (dbUser.status === 'INVITED') {
         dbUser = await prisma.user.update({
           where:  { id: dbUser.id },
@@ -164,22 +167,26 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
       if (dbUser.status !== 'ACTIVE') throw new Error('User suspended')
 
       // Lazy-seed publications for any tenant that currently has none.
-      // Runs on every login until publications exist — safe due to skipDuplicates.
-      const pubCount = await prisma.publication.count({ where: { tenantId: dbUser.tenantId } })
-      if (pubCount === 0) {
-        await prisma.publication.createMany({
-          data: DEFAULT_PUBLICATIONS.map(p => ({
-            tenantId:    dbUser!.tenantId,
-            title:       p.title,
-            type:        p.type as any,
-            issn:        'issn' in p ? (p.issn || undefined) : undefined,
-            isbn:        'isbn' in p ? ((p as any).isbn || undefined) : undefined,
-            description: p.description,
-            status:      'ACTIVE',
-          })),
-          skipDuplicates: true,
-        })
-        app.log.info({ tenantId: dbUser.tenantId }, '✅ Lazy-seeded publications for tenant')
+      // The in-memory set means the COUNT query runs once per tenant per
+      // process lifetime instead of on every authenticated request.
+      if (!seededTenants.has(dbUser.tenantId)) {
+        const pubCount = await prisma.publication.count({ where: { tenantId: dbUser.tenantId } })
+        if (pubCount === 0) {
+          await prisma.publication.createMany({
+            data: DEFAULT_PUBLICATIONS.map(p => ({
+              tenantId:    dbUser!.tenantId,
+              title:       p.title,
+              type:        p.type as any,
+              issn:        'issn' in p ? (p.issn || undefined) : undefined,
+              isbn:        'isbn' in p ? ((p as any).isbn || undefined) : undefined,
+              description: p.description,
+              status:      'ACTIVE',
+            })),
+            skipDuplicates: true,
+          })
+          app.log.info({ tenantId: dbUser.tenantId }, '✅ Lazy-seeded publications for tenant')
+        }
+        seededTenants.add(dbUser.tenantId)
       }
 
       req.user = dbUser as AuthUser

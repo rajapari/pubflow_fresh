@@ -30,12 +30,14 @@ export default function EditSubmissionPage() {
   const submissionId = params.id as string
   const [activeTab, setActiveTab] = React.useState<'editor' | 'metadata'>('editor')
 
+  const utils         = trpc.useUtils()
   const submission    = trpc.submission.byId.useQuery({ id: submissionId })
   const editorConfig  = trpc.submission.getManuscriptEditorUrl.useQuery({ submissionId })
   const downloadQ     = trpc.submission.getManuscriptDownloadUrl.useQuery({ submissionId }, { enabled: false })
   const updateMutation = trpc.submission.updateDraft.useMutation()
   const deleteMutation = trpc.submission.deleteDraft.useMutation()
   const submitM        = trpc.submission.submit.useMutation()
+  const reopenM        = trpc.submission.reopenForRevision.useMutation()
   const submissionData = submission.data as any
 
   const {
@@ -91,7 +93,12 @@ export default function EditSubmissionPage() {
   const format     = editorConfig.data?.format ?? ''
   const isEditorFormat = ['DOCX', 'ODT', 'RTF', 'PDF', 'MARKDOWN'].includes(format)
   const isDraft    = submissionData?.status === 'DRAFT'
+  const isRevision = submissionData?.status === 'REVISION_REQUIRED'
+  const isSubmitted = submissionData?.status === 'SUBMITTED'
   const hasManuscript = !!editorConfig.data
+  // Authors see SUBMITTED docs read-only; offer to reopen for revision.
+  // Editors already have edit rights at this stage, so they never see this.
+  const canReopen = isSubmitted && !canEdit && hasManuscript
 
   const handleDownload = async () => {
     const result = await downloadQ.refetch()
@@ -106,6 +113,28 @@ export default function EditSubmissionPage() {
       router.push(`/dashboard/submissions/${submissionId}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to submit')
+    }
+  }
+
+  const handleReopenForRevision = async () => {
+    if (!confirm(
+      'Reopen this submission for revision?\n\n' +
+      'The submitted file is kept as a version in the history, and your edits go to a new copy. ' +
+      'The submission returns to Draft — submit it again when you are done.'
+    )) return
+    try {
+      await reopenM.mutateAsync({ id: submissionId })
+      toast.success('Reopened for revision — you can edit the document now')
+      // Refetch both the submission (status → DRAFT) and the editor config
+      // (new manuscript version → new document key, edit mode enabled)
+      await Promise.all([
+        utils.submission.byId.invalidate({ id: submissionId }),
+        utils.submission.getManuscriptEditorUrl.invalidate({ submissionId }),
+      ])
+      // OnlyOffice caches the editor instance per document key — reload to remount cleanly
+      window.location.reload()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to reopen submission')
     }
   }
 
@@ -137,10 +166,12 @@ export default function EditSubmissionPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-8">
-      <h1 className="text-3xl font-bold text-gray-900 mb-6">Edit Manuscript</h1>
+    // Editor tab uses the full browser width so OnlyOffice gets a desktop-sized
+    // workspace; the metadata form stays in a comfortable centered column.
+    <div className={activeTab === 'editor' ? 'w-full py-2' : 'max-w-6xl mx-auto py-8'}>
+      <h1 className="text-2xl font-bold text-gray-900 mb-3">Edit Manuscript</h1>
 
-      <div className="flex gap-2 mb-6 border-b border-gray-200">
+      <div className="flex gap-2 mb-4 border-b border-gray-200">
         <button
           onClick={() => setActiveTab('editor')}
           className={`px-4 py-2 font-medium border-b-2 transition-colors ${
@@ -164,7 +195,7 @@ export default function EditSubmissionPage() {
       </div>
 
       {activeTab === 'editor' && editorConfig.data && (
-        <div className="mb-8 space-y-3">
+        <div className="space-y-3">
           {/* Status bar */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -175,9 +206,14 @@ export default function EditSubmissionPage() {
               <span className="text-xs text-gray-400">{format}</span>
             </div>
             <div className="flex items-center gap-2">
-              {isDraft && hasManuscript && (
+              {(isDraft || isRevision) && hasManuscript && (
                 <Button size="sm" onClick={handleSubmitForReview} loading={submitM.isPending}>
-                  Submit for Review
+                  {isRevision ? 'Resubmit Revision' : 'Submit for Review'}
+                </Button>
+              )}
+              {canReopen && (
+                <Button size="sm" onClick={handleReopenForRevision} loading={reopenM.isPending}>
+                  Revise &amp; Resubmit
                 </Button>
               )}
               <Button size="sm" variant="secondary" onClick={handleDownload} loading={downloadQ.isFetching}>
@@ -187,7 +223,9 @@ export default function EditSubmissionPage() {
           </div>
 
           {isEditorFormat ? (
-            <div className="min-h-[600px]">
+            // Viewport-based height: everything above (TopBar, heading, tabs,
+            // status bar) adds up to roughly 15rem; the editor gets the rest.
+            <div className="h-[calc(100vh-15rem)] min-h-[520px]">
               <OnlyOfficeEditor
                 onlyofficeUrl={editorConfig.data.onlyofficeUrl}
                 config={editorConfig.data.config}

@@ -12,8 +12,8 @@ export default function LandingPage() {
     },
     {
       icon: Zap,
-      title: 'Automated Processing',
-      description: 'AI-powered content conversion, image processing, and typesetting automation.',
+      title: 'In-Browser Editing',
+      description: 'A full word processor in the manuscript page — track changes, comments, autosave, and version history.',
     },
     {
       icon: Users,
@@ -32,30 +32,16 @@ export default function LandingPage() {
     },
     {
       icon: CheckCircle,
-      title: 'Quality Assurance',
-      description: 'Proof review, annotation, and approval workflows before publication.',
+      title: 'Publish & Distribute',
+      description: 'DOI registration, JATS XML, public portal, OAI-PMH, RSS, PubMed delivery, and print-on-demand.',
     },
   ]
 
-  const testimonials = [
-    {
-      name: 'Dr. Sarah Chen',
-      role: 'Editor-in-Chief, Academic Press',
-      quote: 'PubFlow transformed our editorial workflow. Submission-to-publication time dropped by 40%.',
-      initials: 'SC',
-    },
-    {
-      name: 'James Miller',
-      role: 'Publishing Director, Global Books',
-      quote: 'The automation features saved us hundreds of hours monthly. Highly recommend for any publisher.',
-      initials: 'JM',
-    },
-    {
-      name: 'Prof. Maria Rodriguez',
-      role: 'Journal Publisher, Science Today',
-      quote: 'Best investment we made. Reviewers love the interface, and our authors report fewer errors.',
-      initials: 'MR',
-    },
+  const workflow = [
+    { step: '01', title: 'Submit',  description: 'Authors submit through a three-step wizard — publication, metadata, co-authors — then upload a manuscript or write directly in the browser.' },
+    { step: '02', title: 'Review',  description: 'Editors run desk review, assign peer reviewers, and record decisions. Authors revise and resubmit with every round preserved as a version.' },
+    { step: '03', title: 'Produce', description: 'Accepted manuscripts move through copy editing, artwork, typesetting, and proof review — each stage with its own queue and permissions.' },
+    { step: '04', title: 'Publish', description: 'One action registers the DOI, generates JATS XML, and pushes the article to your public portal, OAI-PMH endpoint, and RSS feed.' },
   ]
 
   return (
@@ -106,19 +92,21 @@ export default function LandingPage() {
               </p>
             </div>
 
-            {/* Hero Screenshot Placeholder */}
-            <div className="mt-16 rounded-xl border border-gray-200 bg-white p-2 shadow-2xl">
-              <div className="aspect-video bg-gradient-to-br from-gray-100 to-gray-50 rounded-lg flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-gray-400">
-                    <svg className="h-16 w-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                    <p className="text-gray-500 font-medium">Dashboard Preview</p>
-                  </div>
-                </div>
+            {/* Workflow strip */}
+            <div className="mt-16 rounded-xl border border-gray-200 bg-white p-8 shadow-2xl">
+              <div className="flex flex-wrap items-center justify-center gap-2 text-sm font-medium">
+                {['Draft', 'Submitted', 'Peer Review', 'Revision', 'Accepted', 'Copy Editing', 'Typesetting', 'Proof Review', 'Published'].map((stage, i, arr) => (
+                  <span key={stage} className="flex items-center gap-2">
+                    <span className={`rounded-full px-4 py-1.5 ${i === arr.length - 1 ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                      {stage}
+                    </span>
+                    {i < arr.length - 1 && <ArrowRight className="h-4 w-4 text-gray-300" />}
+                  </span>
+                ))}
               </div>
+              <p className="mt-6 text-center text-sm text-gray-500">
+                Fifteen enforced workflow states with a complete audit trail — every manuscript accounted for, from first draft to registered DOI.
+              </p>
             </div>
           </div>
         </section>
@@ -155,31 +143,24 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* Testimonials Section */}
+        {/* How it works */}
         <section className="bg-gray-50 px-4 py-20 sm:py-32 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <h2 className="text-center text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
-              Loved by Publishers Worldwide
+              From Submission to DOI in Four Stages
             </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-center text-xl text-gray-600">
+              One platform owns the entire manuscript lifecycle — no spreadsheets, no email attachments, no lost files.
+            </p>
 
-            <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-              {testimonials.map((testimonial, idx) => (
-                <div key={idx} className="rounded-xl bg-white p-8 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="mb-4 flex gap-1">
-                    {[...Array(5)].map((_, i) => (
-                      <span key={i} className="text-yellow-400">★</span>
-                    ))}
-                  </div>
-                  <p className="mb-6 text-gray-600 italic">&quot;{testimonial.quote}&quot;</p>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-purple-400 font-semibold text-white">
-                      {testimonial.initials}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">{testimonial.name}</p>
-                      <p className="text-sm text-gray-600">{testimonial.role}</p>
-                    </div>
-                  </div>
+            <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+              {workflow.map(item => (
+                <div key={item.step} className="rounded-xl bg-white p-8 shadow-sm hover:shadow-md transition-shadow">
+                  <span className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                    {item.step}
+                  </span>
+                  <h3 className="mt-4 mb-2 text-xl font-semibold text-gray-900">{item.title}</h3>
+                  <p className="text-gray-600 text-sm leading-6">{item.description}</p>
                 </div>
               ))}
             </div>

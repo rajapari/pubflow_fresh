@@ -151,9 +151,11 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
     async (req, reply) => {
       const { submissionId } = req.params as { submissionId: string }
 
-      // Verify OnlyOffice JWT if present
+      // Verify OnlyOffice JWT if present. The Document Server sends it in the
+      // header configured by JWT_HEADER (AuthorizationJwt — renamed so MinIO
+      // presigned downloads don't see two auth mechanisms at once).
       const jwtSecret = process.env.ONLYOFFICE_JWT_SECRET ?? 'pubflow_onlyoffice_secret'
-      const authHeader = req.headers['authorization']
+      const authHeader = (req.headers['authorizationjwt'] ?? req.headers['authorization']) as string | undefined
       if (authHeader) {
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader
         if (!verifyJwt(token, jwtSecret)) {

@@ -195,16 +195,20 @@ export const submissionRouter = router({
         include: { manuscripts: { where: { isLatest: true } } },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
-      if (!isValidTransition(sub.status, 'SUBMITTED'))
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid transition' })
+
+      // First submission goes to SUBMITTED; resubmitting after an editorial
+      // revision request goes to REVISED (which re-enters peer review).
+      const toStatus = sub.status === 'REVISION_REQUIRED' ? 'REVISED' as const : 'SUBMITTED' as const
+      if (!isValidTransition(sub.status, toStatus))
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot submit from ${sub.status} status` })
       if (sub.manuscripts.length === 0)
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Upload a manuscript file first' })
 
       const updated = await prisma.submission.update({
         where: { id: input.id },
         data: {
-          status: 'SUBMITTED', submittedAt: new Date(),
-          workflowLogs: { create: { fromStatus: sub.status, toStatus: 'SUBMITTED', performedBy: user.id } },
+          status: toStatus, submittedAt: new Date(),
+          workflowLogs: { create: { fromStatus: sub.status, toStatus, performedBy: user.id } },
         },
       })
 
@@ -214,6 +218,68 @@ export const submissionRouter = router({
       })
 
       return updated
+    }),
+
+  // Author reopens a SUBMITTED manuscript to rewrite it before editorial review
+  // begins. The submitted file is preserved as a version; edits go to a fresh
+  // copy, and the author resubmits via the normal submit flow when done.
+  reopenForRevision: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma, minio } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.id, tenantId: user.tenantId, authorId: user.id },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (!isValidTransition(sub.status, 'DRAFT'))
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This submission is already in editorial review and can no longer be reopened. Wait for the editor\'s decision.',
+        })
+
+      const latest = await prisma.manuscript.findFirst({
+        where: { submissionId: input.id, isLatest: true },
+        orderBy: { uploadedAt: 'desc' },
+      })
+
+      // Snapshot: copy the submitted file to a new object so the new working
+      // version has its own key (and a fresh OnlyOffice document cache slot),
+      // while the submitted version stays untouched in the history.
+      if (latest) {
+        const filename  = latest.minioKey.split('/').pop() ?? 'manuscript.docx'
+        const newKey    = MinioStorage.buildKey(user.tenantId, input.id, filename)
+        const buffer    = await minio.download(latest.minioKey)
+        await minio.putObject(newKey, buffer)
+
+        await prisma.$transaction([
+          prisma.manuscript.updateMany({
+            where: { submissionId: input.id, isLatest: true },
+            data:  { isLatest: false },
+          }),
+          prisma.manuscript.create({
+            data: {
+              submissionId:  input.id,
+              format:        latest.format,
+              minioPath:     `s3://pubflow-files/${newKey}`,
+              minioKey:      newKey,
+              fileSizeBytes: latest.fileSizeBytes,
+              version:       latest.version + 1,
+              isLatest:      true,
+            },
+          }),
+        ])
+      }
+
+      return prisma.submission.update({
+        where: { id: input.id },
+        data: {
+          status: 'DRAFT',
+          workflowLogs: { create: {
+            fromStatus: sub.status, toStatus: 'DRAFT',
+            performedBy: user.id, note: 'Reopened by author for revision',
+          }},
+        },
+      })
     }),
 
   makeDecision: chiefEditorProcedure
@@ -229,6 +295,15 @@ export const submissionRouter = router({
         ACCEPT: 'ACCEPTED', MINOR_REVISION: 'REVISION_REQUIRED',
         MAJOR_REVISION: 'REVISION_REQUIRED', REJECT: 'REJECTED', DESK_REJECT: 'REJECTED',
       }[input.decision] as SubmissionStatus
+
+      // A decision is only meaningful while the manuscript is under evaluation.
+      // Without this check an editor could re-decide a PUBLISHED article and
+      // silently pull it back into production.
+      if (!isValidTransition(sub.status as SubmissionStatus, nextStatus))
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot record a ${input.decision} decision while the submission is in ${sub.status} status`,
+        })
 
       await prisma.$transaction([
         prisma.editorialDecision.create({
@@ -510,7 +585,8 @@ export const submissionRouter = router({
       const isAdmin  = user.role === 'SUPER_ADMIN'
       const canEdit  =
         isAdmin ||
-        (user.role === 'AUTHOR'            && sub.authorId === user.id && AUTHOR_EDIT_STATUSES.includes(sub.status)) ||
+        // Whoever owns the submission edits it at author stages, whatever their role
+        (sub.authorId === user.id          && AUTHOR_EDIT_STATUSES.includes(sub.status)) ||
         (user.role === 'COPY_EDITOR'       && COPY_EDITOR_STATUSES.includes(sub.status)) ||
         (user.role === 'ARTWORK_EDITOR'    && ['ARTWORK_PROCESSING'].includes(sub.status)) ||
         (user.role === 'TYPESETTER'        && ['TYPESETTING', 'PROOF_REVIEW'].includes(sub.status)) ||
@@ -564,6 +640,15 @@ export const submissionRouter = router({
           key: docKey,
           title: sub.title || 'Manuscript',
           url: docUrl,
+          // permissions live under document, not at the top level — the Document
+          // Server ignores a top-level permissions block entirely.
+          permissions: {
+            comment:  true,
+            download: true,
+            edit:     canEdit,
+            print:    true,
+            review:   canEdit,
+          },
         },
         editorConfig: {
           callbackUrl: `${callbackBase}/wopi/callback/${input.submissionId}`,
@@ -579,18 +664,13 @@ export const submissionRouter = router({
             commentAuthorOnly: false,
           },
         },
-        permissions: {
-          comment:  true,
-          download: true,
-          edit:     canEdit,
-          print:    true,
-          review:   false,
-        },
       }
 
-      // OnlyOffice v7.2+ requires the config to be wrapped in { payload: ... } in the JWT.
-      // Signing the raw config object causes "document security token is not correctly formed".
-      const token = signJwt({ payload }, jwtSecret)
+      // The browser config token is the JWT of the config object itself.
+      // (The { payload: ... } wrapper is only for HTTP header tokens on
+      // inbox/outbox requests — using it here makes the Document Server
+      // reject the config with "security token is not correctly formed".)
+      const token = signJwt(payload, jwtSecret)
 
       return {
         onlyofficeUrl: process.env.ONLYOFFICE_URL || 'http://localhost:8081',
