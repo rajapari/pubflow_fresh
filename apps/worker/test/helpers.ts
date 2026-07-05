@@ -69,6 +69,11 @@ export async function createFixture(prefix = 'test'): Promise<Fixture> {
     publicationId: publication.id,
     submissionId: submission.id,
     cleanup: async () => {
+      // Submission.authorId / publicationId are non-cascading FKs, so clear
+      // submissions before the tenant cascade removes users/publications.
+      await prisma.submission.deleteMany({
+        where: { tenantId: { in: [tenant.id, outsiderTenant.id] } },
+      })
       await prisma.tenant.deleteMany({
         where: { id: { in: [tenant.id, outsiderTenant.id] } },
       })

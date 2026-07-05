@@ -19,7 +19,7 @@ interface Classification {
   reason: string
 }
 
-const GA_HINTS   = ['graphical abstract', 'graphical-abstract', 'graphabstract', 'visual abstract', 'visualabstract', 'toc graphic', 'toc-graphic', 'graphabs']
+const GA_HINTS   = ['graphical abstract', 'graphicalabstract', 'graphabstract', 'visual abstract', 'visualabstract', 'toc graphic', 'tocgraphic', 'graphabs']
 const COVER_HINTS = ['cover', 'front-cover', 'frontcover']
 const SUPP_HINTS = ['supplement', 'supplementary', 'supporting information', 'supporting-information', 'appendix', 'dataset', 'data set', 'raw data', 'video', 'movie', 'audio', 'code', 'sourcedata', 'annex']
 const TABLE_HINTS = ['table']
@@ -30,7 +30,8 @@ const VIDEO_MIME = /^(video|audio)\//
 const DOC_MIME = /(msword|wordprocessingml|opendocument\.text|x-tex|latex|pdf|rtf|markdown)/
 
 function norm(s: string): string {
-  return s.toLowerCase().replace(/_/g, ' ')
+  // Underscores and hyphens both act as word separators in filenames.
+  return s.toLowerCase().replace(/[_-]/g, ' ')
 }
 
 function extOf(filename: string): string {
@@ -39,7 +40,8 @@ function extOf(filename: string): string {
 }
 
 // Deterministic first-pass classification from filename + MIME type.
-function classify(file: IntakeFile): Classification {
+// Exported for unit tests.
+export function classify(file: IntakeFile): Classification {
   const name = norm(file.filename)
   const ext  = extOf(file.filename)
   const mime = file.mimeType.toLowerCase()

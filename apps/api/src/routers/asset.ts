@@ -68,8 +68,12 @@ export const assetRouter = router({
         throw new Error('Not authorized to upload assets for this submission')
       }
 
-      if (submission.status !== 'ACCEPTED' && submission.status !== 'ARTWORK_PROCESSING') {
-        throw new Error('Submission must be in ACCEPTED or ARTWORK_PROCESSING status for asset upload')
+      // DRAFT/SUBMITTED: authors attach figures, supplementary material and the
+      // graphical abstract with the manuscript so the intake bot can classify
+      // them. ACCEPTED/ARTWORK_PROCESSING: production-stage artwork uploads.
+      const UPLOAD_STATUSES = ['DRAFT', 'SUBMITTED', 'ACCEPTED', 'ARTWORK_PROCESSING']
+      if (!UPLOAD_STATUSES.includes(submission.status)) {
+        throw new Error(`Asset upload not allowed while submission is ${submission.status}`)
       }
 
       const minioKey = `assets/${input.submissionId}/${Date.now()}_${input.filename}`
