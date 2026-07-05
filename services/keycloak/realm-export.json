@@ -56,7 +56,8 @@
       "protocol": "openid-connect",
       "attributes": {
         "pkce.code.challenge.method": "S256"
-      }
+      },
+      "directAccessGrantsEnabled": true
     },
     {
       "clientId": "pubflow-api",

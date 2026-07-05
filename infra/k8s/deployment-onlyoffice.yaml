@@ -1,0 +1,76 @@
+# OnlyOffice Document Server — powers the in-browser manuscript editor.
+#
+# JWT pairing is structural here: JWT_SECRET is read from the SAME
+# pubflow-secrets key (ONLYOFFICE_JWT_SECRET) that the API reads via envFrom
+# in deployment-api.yaml. There is one copy of the secret in the cluster, so
+# the API and the Document Server cannot disagree. The API additionally
+# verifies the pairing at startup (apps/api/src/plugins/onlyoffice-check.ts)
+# and logs a critical error if it ever breaks.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-onlyoffice
+  namespace: pubflow
+  labels:
+    app: pubflow-onlyoffice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pubflow-onlyoffice
+  template:
+    metadata:
+      labels:
+        app: pubflow-onlyoffice
+    spec:
+      containers:
+        - name: onlyoffice
+          image: onlyoffice/documentserver:8.3
+          ports:
+            - containerPort: 80
+          env:
+            - name: JWT_ENABLED
+              value: "true"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pubflow-secrets
+                  key: ONLYOFFICE_JWT_SECRET
+            # Custom header so the Document Server's outgoing JWT never collides
+            # with S3/MinIO presigned query auth (400 "multiple authentication
+            # types"). Must stay in sync with the API's callback route, which
+            # reads the AuthorizationJwt header (apps/api/src/routes/wopi.ts).
+            - name: JWT_HEADER
+              value: "AuthorizationJwt"
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthcheck
+              port: 80
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pubflow-onlyoffice
+  namespace: pubflow
+spec:
+  selector:
+    app: pubflow-onlyoffice
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

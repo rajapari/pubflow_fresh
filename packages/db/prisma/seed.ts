@@ -242,6 +242,8 @@ async function main() {
   const EDITOR_PASSWORD = 'Editor@Demo2025!'
   const AUTHOR_EMAIL   = 'author@demo-journal.local'
   const AUTHOR_PASSWORD = 'Author@Demo2025!'
+  const REVIEWER_EMAIL   = 'reviewer@demo-journal.local'
+  const REVIEWER_PASSWORD = 'Reviewer@Demo2025!'
 
   // Helper: reliably upsert a seed user regardless of prior DB/Keycloak state.
   // Priority order avoids unique-constraint collisions without deleting rows that
@@ -303,6 +305,14 @@ async function main() {
   })
   if (authorKcId) console.info(`✅ Author user:   ${AUTHOR_EMAIL}`)
 
+  // Peer reviewer on demo-journal tenant — needed to exercise the review workflow
+  const reviewerKcId = await createKeycloakUser(REVIEWER_EMAIL, 'Rita', 'Reviewer', REVIEWER_PASSWORD)
+  await upsertSeedUser({
+    email: REVIEWER_EMAIL, keycloakId: reviewerKcId, tenantId: demoTenant.id,
+    firstName: 'Rita', lastName: 'Reviewer', role: 'PEER_REVIEWER',
+  })
+  if (reviewerKcId) console.info(`✅ Reviewer user: ${REVIEWER_EMAIL}`)
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.info('')
@@ -315,6 +325,7 @@ async function main() {
     if (adminKcId)  console.info(`  Admin   → ${ADMIN_EMAIL}  /  ${ADMIN_PASSWORD}`)
     if (editorKcId) console.info(`  Editor  → ${EDITOR_EMAIL}  /  ${EDITOR_PASSWORD}`)
     if (authorKcId) console.info(`  Author  → ${AUTHOR_EMAIL}  /  ${AUTHOR_PASSWORD}`)
+    if (reviewerKcId) console.info(`  Reviewer→ ${REVIEWER_EMAIL}  /  ${REVIEWER_PASSWORD}`)
     console.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
     console.info('  Open: http://localhost:3000')
     console.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')

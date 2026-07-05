@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit'
 import multipart from '@fastify/multipart'
 import sensible from '@fastify/sensible'
 import { authPlugin } from './plugins/auth.js'
+import { onlyofficeCheckPlugin } from './plugins/onlyoffice-check.js'
 import { minioPlugin } from './plugins/minio.js'
 import { redisPlugin } from './plugins/redis.js'
 import { bullPlugin } from './plugins/bull.js'
@@ -64,6 +65,7 @@ export async function buildServer() {
   await app.register(minioPlugin)
   await app.register(bullPlugin)
   await app.register(authPlugin)
+  await app.register(onlyofficeCheckPlugin)
 
   // Routes
   await app.register(healthRoutes,  { prefix: '/health' })
