@@ -14,3 +14,4 @@ Thumbs.db
 .vscode
 coverage
 infra/docker/.volumes
+__pycache__/
