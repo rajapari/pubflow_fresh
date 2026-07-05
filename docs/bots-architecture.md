@@ -333,7 +333,34 @@ All new endpoints are tenant-scoped and role-checked (author vs production staff
 
 ---
 
-## 9. Operational Notes
+## 9. Testing
+
+Suites live beside the code they verify; all run against the real local stack
+(Postgres, Redis, MinIO, LanguageTool) with throwaway per-test tenants:
+
+| Suite | Where | Count | Covers |
+|---|---|---|---|
+| Foundation | `apps/worker/test/foundation.test.ts` | 20 | Job schemas, queue↔worker registry invariant, state-machine invariants, Zod↔Prisma enum parity, AI client parsing/fallbacks |
+| Intake | `apps/worker/test/intake.test.ts` | 32 | Table-driven `classify()` heuristics, single-GA enforcement, DB create/update paths, workflow logging |
+| Copyedit | `apps/worker/test/copyedit.test.ts` | 8 | Manual registry, live LT matching + 40k chunk offset re-basing, processor e2e, profile override, failure persistence |
+| Templates | `apps/worker/test/template.test.ts` | 13 | SLA well-formedness, geometry/color/style porting, class-name invariant, unit conversion, IDML→SLA e2e via live extractor |
+| Proof API | `apps/api/test/proofReview.test.ts` | 15 | Role matrix, label sequencing, correction validation, tenant isolation, submit lock (via `createCaller`) |
+| Orchestrator | `apps/api/test/botDispatch.test.ts` | 7 | Real Redis job payloads, no-op paths, never-throw contract, profile-priority dispatch |
+| IDML service | `services/idml/test_server.py` | 6 | Synthetic-IDML extraction, defaults, corrupt/wrong-type rejection |
+| LaTeX service | `services/latex/test_server.py` | 5 | source/latex key contract, resource placement + traversal guard, response shape, pass clamping |
+
+Run: `pnpm --filter @pubflow/worker test`, `pnpm --filter @pubflow/api test`,
+`python -m pytest services/idml services/latex -q`.
+
+Bugs found and fixed by this pass: `PROOF_READER` missing from auth role
+schema/hierarchy; hyphens not treated as filename word separators (GA
+detection misses); camelCase GA hint gap; asset uploads blocked before
+ACCEPTED (starving intake); LT 30s hard timeout aborting full-size chunks;
+IDML CMYK 0–100 emitted into xcolor's 0–1 model (near-black prints);
+LaTeX class-name normalization drift between generator and router;
+plus a stale May-era Postgres container shadowing port 5432.
+
+## 10. Operational Notes
 
 - **Prisma on Windows dev:** running dev servers lock the query-engine DLL → use `npx prisma generate --no-engine` for client-type updates. Always run `npx prisma` from `packages/db` (repo root resolves a newer Prisma with breaking CLI flags).
 - **Migrations:** produced via `prisma migrate diff --from-url <dev db> --to-schema-datamodel`, saved under `prisma/migrations/<ts>_<name>/migration.sql`, applied with `migrate deploy`.
