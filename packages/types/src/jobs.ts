@@ -122,6 +122,13 @@ export const TemplatePortJobSchema = z.object({
 })
 export type TemplatePortJob = z.infer<typeof TemplatePortJobSchema>
 
+// LaTeX class names may only contain letters. Used by BOTH the template
+// generator (\ProvidesClass) and the typesetting router (documentClass +
+// .cls filename) — they must always agree or compilation breaks.
+export function normalizeTemplateClassName(name: string): string {
+  return name.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'pubflowtemplate'
+}
+
 export const QUEUES = {
   PANDOC: 'pandoc',
   LATEX: 'latex',

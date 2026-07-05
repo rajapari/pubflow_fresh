@@ -28,8 +28,8 @@ async function extractIdmlSpec(source: Buffer): Promise<LayoutSpec> {
 }
 
 // Pull basic geometry out of a publisher LaTeX template so the spec is still
-// recorded even when we keep their source as-is.
-function sniffLatexSpec(tex: string): Partial<LayoutSpec> {
+// recorded even when we keep their source as-is. Exported for unit tests.
+export function sniffLatexSpec(tex: string): Partial<LayoutSpec> {
   const spec: Partial<LayoutSpec> = {}
   const geo = tex.match(/\\(?:usepackage|RequirePackage)\s*\[([^\]]*)\]\s*\{geometry\}/s)
   if (geo) {

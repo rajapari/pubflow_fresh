@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure, editorProcedure } from '../trpc/procedures.js'
-import { QUEUES } from '@pubflow/types'
+import { QUEUES, normalizeTemplateClassName } from '@pubflow/types'
 
 const TYPESETTING_STATUSES = ['ACCEPTED', 'COPY_EDITING', 'ARTWORK_PROCESSING', 'TYPESETTING', 'PROOF_REVIEW', 'APPROVED', 'PUBLISHED'] as const
 
@@ -137,10 +137,9 @@ export const typeSettingRouter = router({
         jobData['outputFormat'] = pandocFmt
         jobData['options']      = { citationStyle: 'apa' }
       } else if (input.engine === 'LATEX') {
-        // Class name must match the filename the worker writes for the ported template.
-        const className = template
-          ? template.name.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'pubflowtemplate'
-          : 'article'
+        // Class name must match the generator's \ProvidesClass and the .cls
+        // filename the worker writes — one shared normalizer guarantees it.
+        const className = template ? normalizeTemplateClassName(template.name) : 'article'
         jobData['documentClass'] = className
         jobData['engine']        = 'xelatex'
         jobData['passes']        = 2
