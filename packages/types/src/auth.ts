@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 export const UserRoleSchema = z.enum([
   'SUPER_ADMIN','EDITOR_IN_CHIEF','SECTION_EDITOR','COPY_EDITOR',
-  'ARTWORK_EDITOR','TYPESETTER','PEER_REVIEWER','AUTHOR','READER',
+  'ARTWORK_EDITOR','TYPESETTER','PROOF_READER','PEER_REVIEWER','AUTHOR','READER',
 ])
 export type UserRole = z.infer<typeof UserRoleSchema>
 
@@ -23,7 +23,7 @@ export type AuthUser = z.infer<typeof AuthUserSchema>
 
 export const ROLE_HIERARCHY: Record<UserRole, number> = {
   SUPER_ADMIN: 100, EDITOR_IN_CHIEF: 80, SECTION_EDITOR: 60,
-  COPY_EDITOR: 50, ARTWORK_EDITOR: 50, TYPESETTER: 50,
+  COPY_EDITOR: 50, ARTWORK_EDITOR: 50, TYPESETTER: 50, PROOF_READER: 40,
   PEER_REVIEWER: 30, AUTHOR: 20, READER: 10,
 }
 
