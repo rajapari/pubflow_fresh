@@ -19,6 +19,8 @@ const PANDOC_URL = process.env.PANDOC_SERVICE_URL ?? 'http://localhost:5005'
 const LT_URL     = process.env.LANGUAGETOOL_URL   ?? 'http://localhost:8082'
 // LanguageTool caps request size; chunk long manuscripts.
 const LT_CHUNK   = 40_000
+// Full-length chunks can take minutes on cold/busy LT instances.
+const LT_TIMEOUT = Number(process.env.LANGUAGETOOL_TIMEOUT_MS ?? 120_000)
 // Bound the LLM pass to keep token cost predictable.
 const AI_MAX_CHARS = 60_000
 
@@ -58,7 +60,8 @@ async function extractText(minioKey: string, inputFormat: string): Promise<strin
   return Buffer.from(json.content, 'base64').toString('utf-8')
 }
 
-async function runLanguageTool(
+// Exported for unit tests (chunk offset re-basing).
+export async function runLanguageTool(
   text: string,
   language: string,
   enabledRules: string[],
@@ -75,7 +78,7 @@ async function runLanguageTool(
       method:  'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body:    params,
-      signal:  AbortSignal.timeout(30_000),
+      signal:  AbortSignal.timeout(LT_TIMEOUT),
     })
     if (!res.ok) throw new Error(`LanguageTool returned ${res.status}`)
     const data = await res.json() as { matches: LtMatch[] }
