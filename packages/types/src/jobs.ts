@@ -122,6 +122,19 @@ export const TemplatePortJobSchema = z.object({
 })
 export type TemplatePortJob = z.infer<typeof TemplatePortJobSchema>
 
+// ── Proof-correction application ─────────────────────────
+// Consumes ACCEPTED ProofCorrection rows for a submission: locates each
+// targetText in the latest DOCX manuscript, applies the change as a new
+// manuscript version, marks corrections APPLIED. Unlocatable targets are
+// annotated for manual application — never guessed.
+export const CorrectionApplyJobSchema = z.object({
+  type: z.literal('CORRECTION_APPLY'),
+  submissionId: z.string().uuid(),
+  // Who requested the run (for the workflow log note).
+  requestedById: z.string().uuid(),
+})
+export type CorrectionApplyJob = z.infer<typeof CorrectionApplyJobSchema>
+
 // LaTeX class names may only contain letters. Used by BOTH the template
 // generator (\ProvidesClass) and the typesetting router (documentClass +
 // .cls filename) — they must always agree or compilation breaks.
@@ -139,5 +152,6 @@ export const QUEUES = {
   INTAKE: 'intake',
   COPYEDIT: 'copyedit',
   TEMPLATE: 'template',
+  CORRECTION: 'correction',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

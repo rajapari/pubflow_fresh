@@ -203,6 +203,11 @@ export default function EditSubmissionPage() {
                 ? <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">Editing enabled</span>
                 : <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">View only — editing not available at this workflow stage</span>
               }
+              {(submissionData?.revisionRound ?? 0) > 0 && (
+                <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-800">
+                  Revision round {submissionData.revisionRound} of 3
+                </span>
+              )}
               <span className="text-xs text-gray-400">{format}</span>
             </div>
             <div className="flex items-center gap-2">

@@ -457,6 +457,39 @@ export const proofReviewRouter = router({
       })
     }),
 
+  // Run the Correction Applier bot: applies every ACCEPTED correction to the
+  // latest DOCX manuscript as a new version, marks them APPLIED, and flags
+  // anything it cannot locate for manual application.
+  applyCorrections: protectedProcedure
+    .input(z.object({ submissionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'TYPESETTER'].includes(ctx.user.role))
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only editors and typesetters can apply corrections' })
+
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
+      })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (!['PROOF_REVIEW', 'TYPESETTING'].includes(submission.status))
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Corrections are applied during proofing/typesetting — the submission is in ${submission.status}`,
+        })
+
+      const accepted = await ctx.prisma.proofCorrection.count({
+        where: { submissionId: input.submissionId, status: 'ACCEPTED' },
+      })
+      if (accepted === 0)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No ACCEPTED corrections to apply — accept corrections first' })
+
+      await ctx.queues[QUEUES.CORRECTION].add('apply-corrections', {
+        type: 'CORRECTION_APPLY',
+        submissionId: input.submissionId,
+        requestedById: ctx.user.id,
+      })
+      return { queued: accepted }
+    }),
+
   // Delete own correction while the proof is still open.
   deleteCorrection: protectedProcedure
     .input(z.object({ correctionId: z.string().uuid() }))

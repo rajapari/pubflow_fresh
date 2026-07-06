@@ -245,6 +245,14 @@ async function main() {
   const REVIEWER_EMAIL   = 'reviewer@demo-journal.local'
   const REVIEWER_PASSWORD = 'Reviewer@Demo2025!'
 
+  // Production-stage roles (copyediting → artwork → typesetting → proofreading)
+  const PRODUCTION_USERS = [
+    { email: 'copyeditor@demo-journal.local',  password: 'CopyEditor@Demo2025!',  firstName: 'Cora', lastName: 'Copyeditor',  role: 'COPY_EDITOR' },
+    { email: 'artwork@demo-journal.local',     password: 'Artwork@Demo2025!',     firstName: 'Ari',  lastName: 'Artworker',   role: 'ARTWORK_EDITOR' },
+    { email: 'typesetter@demo-journal.local',  password: 'Typesetter@Demo2025!',  firstName: 'Theo', lastName: 'Typesetter',  role: 'TYPESETTER' },
+    { email: 'proofreader@demo-journal.local', password: 'ProofReader@Demo2025!', firstName: 'Pria', lastName: 'Proofreader', role: 'PROOF_READER' },
+  ] as const
+
   // Helper: reliably upsert a seed user regardless of prior DB/Keycloak state.
   // Priority order avoids unique-constraint collisions without deleting rows that
   // may be referenced by existing submissions (FK constraint).
@@ -313,6 +321,18 @@ async function main() {
   })
   if (reviewerKcId) console.info(`✅ Reviewer user: ${REVIEWER_EMAIL}`)
 
+  // Production-stage users on demo-journal tenant
+  const productionKcIds: Record<string, string | null> = {}
+  for (const p of PRODUCTION_USERS) {
+    const kcId = await createKeycloakUser(p.email, p.firstName, p.lastName, p.password)
+    productionKcIds[p.email] = kcId
+    await upsertSeedUser({
+      email: p.email, keycloakId: kcId, tenantId: demoTenant.id,
+      firstName: p.firstName, lastName: p.lastName, role: p.role,
+    })
+    if (kcId) console.info(`✅ ${p.role} user: ${p.email}`)
+  }
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.info('')
@@ -326,6 +346,9 @@ async function main() {
     if (editorKcId) console.info(`  Editor  → ${EDITOR_EMAIL}  /  ${EDITOR_PASSWORD}`)
     if (authorKcId) console.info(`  Author  → ${AUTHOR_EMAIL}  /  ${AUTHOR_PASSWORD}`)
     if (reviewerKcId) console.info(`  Reviewer→ ${REVIEWER_EMAIL}  /  ${REVIEWER_PASSWORD}`)
+    for (const p of PRODUCTION_USERS) {
+      if (productionKcIds[p.email]) console.info(`  ${p.role.padEnd(8)}→ ${p.email}  /  ${p.password}`)
+    }
     console.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
     console.info('  Open: http://localhost:3000')
     console.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')

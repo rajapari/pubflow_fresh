@@ -289,7 +289,7 @@ export const submissionRouter = router({
   makeDecision: chiefEditorProcedure
     .input(z.object({ submissionId: z.string().uuid() }).merge(EditorialDecisionSchema))
     .mutation(async ({ ctx, input }) => {
-      const { user, prisma, queues } = ctx
+      const { user, prisma, queues, minio } = ctx
       const sub = await prisma.submission.findFirst({
         where: { id: input.submissionId, tenantId: user.tenantId },
       })
@@ -309,6 +309,16 @@ export const submissionRouter = router({
           message: `Cannot record a ${input.decision} decision while the submission is in ${sub.status} status`,
         })
 
+      // Revision-round cap: at most 3 author↔reviewer rounds. After the third,
+      // the editor must make a final call — accept or reject.
+      const MAX_REVISION_ROUNDS = 3
+      const isRevisionDecision  = nextStatus === 'REVISION_REQUIRED'
+      if (isRevisionDecision && sub.revisionRound >= MAX_REVISION_ROUNDS)
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `This manuscript has completed ${MAX_REVISION_ROUNDS} revision rounds — the maximum allowed. Please make a final decision: Accept or Reject.`,
+        })
+
       await prisma.$transaction([
         prisma.editorialDecision.create({
           data: { submissionId: input.submissionId, editorId: user.id,
@@ -318,13 +328,55 @@ export const submissionRouter = router({
           where: { id: input.submissionId },
           data: {
             status: nextStatus,
+            ...(isRevisionDecision ? { revisionRound: { increment: 1 } } : {}),
             workflowLogs: { create: {
               fromStatus: sub.status, toStatus: nextStatus,
-              performedBy: user.id, note: `Decision: ${input.decision}`,
+              performedBy: user.id,
+              note: `Decision: ${input.decision}` +
+                    (isRevisionDecision ? ` (revision round ${sub.revisionRound + 1} of ${MAX_REVISION_ROUNDS})` : ''),
             }},
           },
         }),
       ])
+
+      // Version immutability between rounds: the manuscript the reviewers saw
+      // must stay untouched. Snapshot it as a new numbered version so the
+      // author's revision edits land on a fresh copy (fresh editor cache key).
+      if (isRevisionDecision) {
+        try {
+          const latest = await prisma.manuscript.findFirst({
+            where: { submissionId: input.submissionId, isLatest: true },
+            orderBy: { uploadedAt: 'desc' },
+          })
+          if (latest) {
+            const filename = latest.minioKey.split('/').pop() ?? 'manuscript.docx'
+            const newKey   = MinioStorage.buildKey(user.tenantId, input.submissionId, filename)
+            const buffer   = await minio.download(latest.minioKey)
+            await minio.putObject(newKey, buffer)
+            await prisma.$transaction([
+              prisma.manuscript.updateMany({
+                where: { submissionId: input.submissionId, isLatest: true },
+                data:  { isLatest: false },
+              }),
+              prisma.manuscript.create({
+                data: {
+                  submissionId:  input.submissionId,
+                  format:        latest.format,
+                  minioPath:     `s3://pubflow-files/${newKey}`,
+                  minioKey:      newKey,
+                  fileSizeBytes: latest.fileSizeBytes,
+                  version:       latest.version + 1,
+                  isLatest:      true,
+                },
+              }),
+            ])
+          }
+        } catch (err) {
+          // Snapshot failure must not undo the recorded decision; the author
+          // can still revise the current version.
+          ctx.prisma && console.error(`[makeDecision] version snapshot failed for ${input.submissionId}:`, err)
+        }
+      }
 
       // Always notify author of the decision
       await queues[QUEUES.NOTIFICATION].add('decision', {

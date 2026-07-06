@@ -361,6 +361,9 @@ model Submission {
   keywords      String[]
   coAuthors     Json             @default("[]")
   status        SubmissionStatus @default(DRAFT)
+  // Peer-review revision rounds completed (each MINOR/MAJOR_REVISION decision
+  // increments). Hard cap 3: afterwards the editor must accept or reject.
+  revisionRound Int              @default(0)
   doi           String?
   submittedAt   DateTime?
   createdAt     DateTime         @default(now())

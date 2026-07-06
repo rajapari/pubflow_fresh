@@ -71,6 +71,7 @@ Defined in `packages/types/src/jobs.ts` (`QUEUES` const). The API's bull plugin 
 | `intake` ✅ | `intake.ts` | 3 | Submission file classification & separation |
 | `copyedit` ✅ | `copyedit.ts` | 2 | Style-manual analysis (LanguageTool + AI) |
 | `template` ✅ | `template.ts` | 2 | Publisher layout porting (IDML → Scribus/LaTeX) |
+| `correction` ✅ | `correction.ts` | 2 | Applies ACCEPTED proof corrections to the DOCX manuscript as a new version |
 
 **Adding a queue** = add to `QUEUES` + a Zod job schema in `jobs.ts`, a processor in `apps/worker/src/processors/`, and one `new Worker(...)` line in `worker.ts`. The API side needs nothing.
 
@@ -85,7 +86,12 @@ Defined in `packages/types/src/jobs.ts` (`QUEUES` const). The API's bull plugin 
 
 Central stage-bot dispatch, called from routers after a status transition commits:
 
-- `dispatchStageBots(prisma, queues, submissionId, toStatus)` — switch on target status. Currently: `SUBMITTED` → enqueue intake classification of all uploaded assets. Future stages plug into the same switch (see §5).
+- `dispatchStageBots(prisma, queues, submissionId, toStatus)` — switch on target status:
+  - `SUBMITTED` → intake classification of all uploaded assets
+  - `COPY_EDITING` → notify all active tenant `COPY_EDITOR`s a manuscript awaits assignment
+  - `ARTWORK_PROCESSING` → Image QA jobs (DPI ≥300, color mode, metadata, thumbnail) for every FIGURE / GRAPHICAL_ABSTRACT / COVER asset + notify `ARTWORK_EDITOR`s
+  - `TYPESETTING` → notify `TYPESETTER`s (composition remains a human action via `typesetting.triggerJob`)
+  - `PROOF_REVIEW` → `PROOF_READY` notifications to the author plus `PROOF_READER`s and `EDITOR_IN_CHIEF`s
 - `dispatchCopyEditStyleBot(...)` — fired by `copyEdit.assign`; resolves the default `StyleProfile` (publication-specific beats tenant-wide) and enqueues the style bot.
 - **Contract:** dispatch is best-effort; all errors are caught and logged, never thrown, so workflow transitions cannot be blocked by bot infrastructure.
 
@@ -145,6 +151,14 @@ Asset linkage rule ✅: intake writes `metadata.linkedToDeliverable = true` on S
 | **Anonymizer Bot** | 🔜 | Strip author metadata + title-page identifiers from DOCX/PDF for double-blind review. |
 
 ### Stage 3 — Author Revision
+
+**Revision-round governance ✅** — `Submission.revisionRound` counts completed
+author↔reviewer rounds. Each MINOR/MAJOR_REVISION decision increments it and
+**snapshots the reviewed manuscript as a new immutable version** (the author's
+edits land on a fresh copy with its own editor cache key). Hard cap **3
+rounds**: `makeDecision` rejects a fourth revision decision — the editor must
+accept or reject. The round is shown in the editor UI and in every decision's
+workflow-log entry.
 
 | Bot | Status | Notes |
 |---|---|---|
@@ -207,9 +221,9 @@ Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, 
 
 ### Stage 10 — Correction Review / Application
 
-| Bot | Status | Notes |
+| Bot | Status | How it works |
 |---|---|---|
-| **Correction Applier Bot** | 🔜 | Consumes ACCEPTED `ProofCorrection` rows: locate `targetText` in manuscript source, apply `newText`, mark APPLIED, re-enqueue typesetting, bump proof round. Unlocatable targets → flagged for manual application. This is the highest-value next bot: its entire input structure already exists. |
+| **Correction Applier Bot** | ✅ | `processors/correction.ts` on the `correction` queue, triggered by `proofReview.applyCorrections` (editor/typesetter; submission must be in PROOF_REVIEW or TYPESETTING). Consumes ACCEPTED `ProofCorrection` rows: REPLACE/DELETE targets are matched against the **concatenated visible text of the DOCX** (dependency-free ZIP reader/writer + `<w:t>` node mapping), so targets split across formatting runs are still found. A target must occur **exactly once** — ambiguous or missing targets are annotated on the correction (`[bot] …`) and left ACCEPTED for manual application; the bot never guesses. INSERT/MOVE/COMMENT/QUERY_ANSWER are positional → always manual. Applied changes produce a **new numbered manuscript version** (proofed version stays immutable), corrections flip to APPLIED, and a SYSTEM `WorkflowLog` records `{applied[], manual[]}`. Non-DOCX manuscripts route everything to manual. |
 
 ### Stage 11 — XML & EPUB Generation
 
@@ -282,6 +296,7 @@ CopyEditJob      { type:'COPYEDIT', submissionId, copyEditId, inputMinioKey,
 TemplatePortJob  { type:'TEMPLATE_PORT', templateId, sourceMinioKey,
                    sourceFormat: idml|indd|latex|pdf, targetEngine: SCRIBUS|LATEX }
 LatexJob         { ...existing, templateMinioKey?, templateClassName? }   // ported .cls support
+CorrectionApplyJob { type:'CORRECTION_APPLY', submissionId, requestedById }
 ```
 
 Planned queues for 🔜 bots: `similarity`, `preflight`, `xmlvalidate`, `publish`, `marketing` — same recipe (schema + processor + Worker line).
@@ -325,11 +340,26 @@ All new endpoints are tenant-scoped and role-checked (author vs production staff
 | Phase | Contents | Status |
 |---|---|---|
 | **A — Foundations + 4 flagship bots** | Queues, schema, AI client, intake classifier, style-manual engine, template porting, proof workbench, orchestrator | ✅ **Done (2026-07-05)** |
-| **B — Close the production loop** | Correction Applier (Stage 10), Preflight, XML/EPUB Validator, Issue Assembler | 🔜 next |
+| **B — Close the production loop** | ✅ Correction Applier (Stage 10) · ✅ revision-round governance (max 3, per-round version snapshots) · ✅ stage-transition dispatch for COPY_EDITING/ARTWORK/TYPESETTING/PROOF_REVIEW · ✅ production-role seed users · 🔜 Preflight, XML/EPUB Validator, Issue Assembler | ⏳ **In progress (2026-07-06)** |
 | **C — Editorial intelligence** | Similarity check, reviewer matcher, AI screening, revision diff + rebuttal coverage, decision letters | 🔜 |
 | **D — Reach & compliance** | Alt-text, marketing/social/newsletter, SEO meta, DOAJ/archival, APC/dunning, ethics/data-availability/integrity, accessibility | 🔜 |
 
-**Recommended next step:** Correction Applier Bot — its input (`ProofCorrection` ACCEPTED rows) and output (typesetting re-run) are both already implemented, making it the shortest path to a fully closed proof-correction loop.
+**Recommended next step:** Preflight Bot (Stage 8) — with corrections now applied automatically and typesetting re-runs producing fresh PDFs, PDF/X conformance checking is the remaining gate before PROOF_REVIEW.
+
+### Seeded workflow accounts (demo-journal tenant)
+
+`pnpm db:seed` provisions one account per workflow role:
+
+| Role | Email | Password |
+|---|---|---|
+| Editor-in-Chief | editor@demo-journal.local | Editor@Demo2025! |
+| Author | author@demo-journal.local | Author@Demo2025! |
+| Peer Reviewer | reviewer@demo-journal.local | Reviewer@Demo2025! |
+| Copy Editor | copyeditor@demo-journal.local | CopyEditor@Demo2025! |
+| Artwork Editor | artwork@demo-journal.local | Artwork@Demo2025! |
+| Typesetter | typesetter@demo-journal.local | Typesetter@Demo2025! |
+| Proofreader | proofreader@demo-journal.local | ProofReader@Demo2025! |
+| Super Admin (pubflow-admin tenant) | admin@pubflow.local | Admin@PubFlow2025! |
 
 ---
 

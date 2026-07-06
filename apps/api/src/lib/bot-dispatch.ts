@@ -12,6 +12,32 @@ import type { PrismaClient } from '@pubflow/db'
 
 type Queues = Record<QueueName, Queue>
 
+/** Email every active tenant user holding one of the given roles. */
+async function notifyRole(
+  prisma: PrismaClient,
+  queues: Queues,
+  submissionId: string,
+  roles: string[],
+  template: 'COPY_EDIT_ASSIGNED' | 'PROOF_READY',
+): Promise<void> {
+  const sub = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    select: { title: true, tenantId: true },
+  })
+  if (!sub) return
+  const staff = await prisma.user.findMany({
+    where: { tenantId: sub.tenantId, role: { in: roles as any }, status: 'ACTIVE' },
+    select: { email: true },
+  })
+  if (staff.length === 0) return
+  await queues[QUEUES.NOTIFICATION].add(`stage-alert-${roles[0].toLowerCase()}`, {
+    type: 'NOTIFICATION',
+    to: staff.map(s => s.email),
+    template,
+    data: { submissionId, title: sub.title },
+  })
+}
+
 export async function dispatchStageBots(
   prisma: PrismaClient,
   queues: Queues,
@@ -46,6 +72,63 @@ export async function dispatchStageBots(
         })
         break
       }
+
+      // Entering copyediting: alert the tenant's copy editors that a
+      // manuscript is waiting for assignment.
+      case 'COPY_EDITING': {
+        await notifyRole(prisma, queues, submissionId, ['COPY_EDITOR'], 'COPY_EDIT_ASSIGNED')
+        break
+      }
+
+      // Entering artwork processing: run Image QA (DPI, color mode, metadata,
+      // thumbnails) over every visual asset so the artwork editor starts from
+      // a validation report instead of opening each file blind.
+      case 'ARTWORK_PROCESSING': {
+        const images = await prisma.asset.findMany({
+          where: {
+            submissionId,
+            assetType: { in: ['FIGURE', 'GRAPHICAL_ABSTRACT', 'COVER'] },
+          },
+          select: { id: true, minioKey: true },
+        })
+        for (const img of images) {
+          await queues[QUEUES.IMAGE].add('artwork-qa', {
+            type: 'IMAGE',
+            assetId: img.id,
+            submissionId,
+            inputMinioKey: img.minioKey,
+            tasks: ['VALIDATE_DPI', 'VALIDATE_COLORMODE', 'EXTRACT_METADATA', 'GENERATE_THUMBNAIL'],
+            targetDpi: 300,
+          })
+        }
+        await notifyRole(prisma, queues, submissionId, ['ARTWORK_EDITOR'], 'COPY_EDIT_ASSIGNED')
+        break
+      }
+
+      // Entering typesetting: alert typesetters. Composition itself stays a
+      // human action (engine/template choice via typesetting.triggerJob).
+      case 'TYPESETTING': {
+        await notifyRole(prisma, queues, submissionId, ['TYPESETTER'], 'COPY_EDIT_ASSIGNED')
+        break
+      }
+
+      // Entering proof review: the proof is ready — tell the author, the
+      // editors, and the proofreaders.
+      case 'PROOF_REVIEW': {
+        const sub = await prisma.submission.findUnique({
+          where: { id: submissionId },
+          include: { author: { select: { email: true } } },
+        })
+        if (sub?.author?.email) {
+          await queues[QUEUES.NOTIFICATION].add('proof-ready-author', {
+            type: 'NOTIFICATION', to: [sub.author.email], template: 'PROOF_READY',
+            data: { submissionId, title: sub.title },
+          })
+        }
+        await notifyRole(prisma, queues, submissionId, ['PROOF_READER', 'EDITOR_IN_CHIEF'], 'PROOF_READY')
+        break
+      }
+
       default:
         break
     }
