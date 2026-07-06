@@ -378,6 +378,10 @@ export const submissionRouter = router({
         }
       }
 
+      // Orchestrator contract: every transition-performing mutation dispatches
+      // stage bots for the target status (was missing here — gap fix).
+      await dispatchStageBots(prisma, queues, input.submissionId, nextStatus)
+
       // Always notify author of the decision
       await queues[QUEUES.NOTIFICATION].add('decision', {
         type: 'NOTIFICATION', to: [], template: 'DECISION_MADE',

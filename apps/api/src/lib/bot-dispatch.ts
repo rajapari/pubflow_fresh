@@ -46,9 +46,17 @@ export async function dispatchStageBots(
 ): Promise<void> {
   try {
     switch (toStatus) {
-      // On submission: classify the uploaded bundle — separate supplementary
-      // material and the graphical abstract so they follow the deliverable.
+      // On submission: run the format & completeness checker, then classify
+      // the uploaded bundle — separate supplementary material and the
+      // graphical abstract so they follow the deliverable.
       case 'SUBMITTED': {
+        // Completeness first: it has no asset dependency, so it must run even
+        // for create-in-editor submissions that uploaded nothing.
+        await queues[QUEUES.INTAKE].add('completeness-check', {
+          type: 'COMPLETENESS',
+          submissionId,
+        })
+
         const assets = await prisma.asset.findMany({
           where: { submissionId },
           select: {
@@ -69,6 +77,16 @@ export async function dispatchStageBots(
             sizeBytes: a.fileSizeBytes,
             uploadedById: a.uploadedById,
           })),
+        })
+        break
+      }
+
+      // Author resubmitted a revision: diff the reviewed version against the
+      // revised version so editors/reviewers see what changed this round.
+      case 'REVISED': {
+        await queues[QUEUES.REVISION].add('revision-diff', {
+          type: 'REVISION_DIFF',
+          submissionId,
         })
         break
       }

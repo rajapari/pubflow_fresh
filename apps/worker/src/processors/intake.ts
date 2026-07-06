@@ -10,6 +10,7 @@ import type { IntakeFile } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
 import { downloadFromMinio } from '../lib/storage.js'
 import { aiEnabled, aiJSON } from '../lib/ai.js'
+import { completenessCheck } from './completeness.js'
 
 type AssetType = 'FIGURE' | 'TABLE' | 'SUPPLEMENTARY' | 'GRAPHICAL_ABSTRACT' | 'COVER'
 
@@ -122,6 +123,11 @@ async function pickGraphicalAbstract(
 }
 
 export async function intakeProcessor(job: Job) {
+  // The intake queue carries two job kinds: file classification (INTAKE)
+  // and the format & completeness checker (COMPLETENESS).
+  if ((job.data as { type?: string }).type === 'COMPLETENESS') {
+    return completenessCheck(job)
+  }
   const d = IntakeJobSchema.parse(job.data)
 
   const results = d.files.map((file) => ({ file, ...classify(file) }))

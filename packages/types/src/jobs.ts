@@ -56,7 +56,7 @@ export const NotificationJobSchema = z.object({
   template: z.enum([
     'SUBMISSION_RECEIVED','REVIEW_INVITED','REVIEW_SUBMITTED','REVIEW_REMINDER',
     'DECISION_MADE','REVISION_REQUESTED','PROOF_READY','PUBLISHED',
-    'COPY_EDIT_ASSIGNED',
+    'COPY_EDIT_ASSIGNED','USER_INVITED','COMPLETENESS_REPORT',
   ]),
   data: z.record(z.unknown()),
 })
@@ -85,6 +85,29 @@ export const IntakeJobSchema = z.object({
   useVision: z.boolean().default(true),
 })
 export type IntakeJob = z.infer<typeof IntakeJobSchema>
+
+// ── Intake: format & completeness checker ────────────────
+// Deterministic pre-desk-review checks: metadata present, manuscript file
+// readable, word count, references section, figure mentions vs uploads.
+// Report → WorkflowLog metadata; author notified only when checks fail.
+export const CompletenessJobSchema = z.object({
+  type: z.literal('COMPLETENESS'),
+  submissionId: z.string().uuid(),
+})
+export type CompletenessJob = z.infer<typeof CompletenessJobSchema>
+
+// ── Revision: diff between manuscript versions ───────────
+// Runs when the author resubmits a revision (→ REVISED): compares the
+// version reviewers saw with the author's revised version so editors and
+// reviewers immediately see what changed in each round.
+export const RevisionDiffJobSchema = z.object({
+  type: z.literal('REVISION_DIFF'),
+  submissionId: z.string().uuid(),
+  // Defaults: the two most recent versions.
+  fromVersion: z.number().int().positive().optional(),
+  toVersion: z.number().int().positive().optional(),
+})
+export type RevisionDiffJob = z.infer<typeof RevisionDiffJobSchema>
 
 // ── Copyediting: pluggable style-manual engine ───────────
 // In-house style is just another profile layered on top of a base manual.
@@ -153,5 +176,6 @@ export const QUEUES = {
   COPYEDIT: 'copyedit',
   TEMPLATE: 'template',
   CORRECTION: 'correction',
+  REVISION: 'revision',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

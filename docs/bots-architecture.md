@@ -72,6 +72,9 @@ Defined in `packages/types/src/jobs.ts` (`QUEUES` const). The API's bull plugin 
 | `copyedit` ✅ | `copyedit.ts` | 2 | Style-manual analysis (LanguageTool + AI) |
 | `template` ✅ | `template.ts` | 2 | Publisher layout porting (IDML → Scribus/LaTeX) |
 | `correction` ✅ | `correction.ts` | 2 | Applies ACCEPTED proof corrections to the DOCX manuscript as a new version |
+| `revision` ✅ | `revision.ts` | 2 | Paragraph-level LCS diff between manuscript versions on author resubmission |
+
+The `intake` queue carries two job kinds: `INTAKE` (file classification) and `COMPLETENESS` (format & completeness checks) — the processor routes on `data.type`.
 
 **Adding a queue** = add to `QUEUES` + a Zod job schema in `jobs.ts`, a processor in `apps/worker/src/processors/`, and one `new Worker(...)` line in `worker.ts`. The API side needs nothing.
 
@@ -87,7 +90,8 @@ Defined in `packages/types/src/jobs.ts` (`QUEUES` const). The API's bull plugin 
 Central stage-bot dispatch, called from routers after a status transition commits:
 
 - `dispatchStageBots(prisma, queues, submissionId, toStatus)` — switch on target status:
-  - `SUBMITTED` → intake classification of all uploaded assets
+  - `SUBMITTED` → completeness check (always) + intake classification of uploaded assets
+  - `REVISED` → revision diff (reviewed version vs author's revised version)
   - `COPY_EDITING` → notify all active tenant `COPY_EDITOR`s a manuscript awaits assignment
   - `ARTWORK_PROCESSING` → Image QA jobs (DPI ≥300, color mode, metadata, thumbnail) for every FIGURE / GRAPHICAL_ABSTRACT / COVER asset + notify `ARTWORK_EDITOR`s
   - `TYPESETTING` → notify `TYPESETTER`s (composition remains a human action via `typesetting.triggerJob`)
@@ -135,7 +139,7 @@ Asset linkage rule ✅: intake writes `metadata.linkedToDeliverable = true` on S
 |---|---|---|
 | **Manuscript Normalizer** | ✅ | `submission.ts` fires `PANDOC:normalize-manuscript` on upload |
 | **File Classifier / Separator** | ✅ 🤖 | `processors/intake.ts`. Deterministic filename/MIME heuristics classify every file (manuscript / FIGURE / TABLE / SUPPLEMENTARY / GRAPHICAL_ABSTRACT / COVER) with confidence + reason. If no filename identifies a graphical abstract, AI vision reviews up to 6 figure candidates (≤5 MB each) and nominates one or none. Exactly one GA enforced (highest confidence wins; others demoted). Re-classifies existing `Asset` rows via `assetId` or creates new ones. Triggers: auto on `SUBMITTED` (orchestrator) or manual `asset.classifyIntake` mutation. |
-| **Format & Completeness Checker** | 🔜 | New job on `intake` queue: required sections (abstract, keywords, references), word/figure counts vs publication guidelines, file integrity. Result → submission metadata + author notification. |
+| **Format & Completeness Checker** | ✅ | `processors/completeness.ts` (`COMPLETENESS` job on the `intake` queue, auto on SUBMITTED). Deterministic checks: title/abstract/keywords/co-author emails, manuscript present, DOCX package integrity, body word count, references-section heading, figure mentions in text vs uploaded figure assets. Each check is pass/warn/fail; the structured report lands in a SYSTEM `WorkflowLog` (`metadata.checks`), and the author gets a `COMPLETENESS_REPORT` email **only when something failed**. No AI, works on every deployment. |
 | **Plagiarism / Similarity Bot** | 🔜 | Crossref Similarity Check (iThenticate) or Copyleaks REST API; store score + report URL on submission; flag > threshold to editor. |
 | **AI Screening / Desk-Reject Triage** | 🔜 🤖 | Scope-fit vs publication description, quality red flags, paper-mill signals → structured recommendation for the desk editor (never auto-rejects). |
 | **Metadata Extraction Bot** | 🔜 🤖 | GROBID service + AI cleanup → title/authors/affiliations/ORCID/funding pre-fill. |
@@ -162,7 +166,7 @@ workflow-log entry.
 
 | Bot | Status | Notes |
 |---|---|---|
-| **Revision Diff Bot** | 🔜 | Pandoc → normalized text of v(n) vs v(n+1); render side-by-side diff; scaffold response-to-reviewers doc. |
+| **Revision Diff Bot** | ✅ | `processors/revision.ts` on the `revision` queue, auto on → REVISED. Extracts paragraphs from both DOCX versions (shared `lib/docx.ts`), computes an exact paragraph-level LCS diff (adjacent remove+add pairs merged into "modified"; graceful word-count-only fallback above ~4M cell pairs), uploads the full JSON report to MinIO (`revision-diffs/{submissionId}/v{a}-v{b}.json`) and writes a SYSTEM `WorkflowLog` summary: `+X/−Y words, A added / R removed / M modified paragraph(s)`. Non-DOCX version pairs are skipped with a log. |
 | **Rebuttal Coverage Checker** | 🔜 🤖 | Map each reviewer point to revision changes; list unaddressed points. |
 
 ### Stage 4 — Approval / Editorial Decision
@@ -297,6 +301,8 @@ TemplatePortJob  { type:'TEMPLATE_PORT', templateId, sourceMinioKey,
                    sourceFormat: idml|indd|latex|pdf, targetEngine: SCRIBUS|LATEX }
 LatexJob         { ...existing, templateMinioKey?, templateClassName? }   // ported .cls support
 CorrectionApplyJob { type:'CORRECTION_APPLY', submissionId, requestedById }
+CompletenessJob    { type:'COMPLETENESS', submissionId }                       // intake queue
+RevisionDiffJob    { type:'REVISION_DIFF', submissionId, fromVersion?, toVersion? }
 ```
 
 Planned queues for 🔜 bots: `similarity`, `preflight`, `xmlvalidate`, `publish`, `marketing` — same recipe (schema + processor + Worker line).
@@ -341,7 +347,7 @@ All new endpoints are tenant-scoped and role-checked (author vs production staff
 |---|---|---|
 | **A — Foundations + 4 flagship bots** | Queues, schema, AI client, intake classifier, style-manual engine, template porting, proof workbench, orchestrator | ✅ **Done (2026-07-05)** |
 | **B — Close the production loop** | ✅ Correction Applier (Stage 10) · ✅ revision-round governance (max 3, per-round version snapshots) · ✅ stage-transition dispatch for COPY_EDITING/ARTWORK/TYPESETTING/PROOF_REVIEW · ✅ production-role seed users · 🔜 Preflight, XML/EPUB Validator, Issue Assembler | ⏳ **In progress (2026-07-06)** |
-| **C — Editorial intelligence** | Similarity check, reviewer matcher, AI screening, revision diff + rebuttal coverage, decision letters | 🔜 |
+| **C — Editorial intelligence** | ✅ Format & Completeness Checker · ✅ Revision Diff Bot · 🔜 similarity check, reviewer matcher, AI screening, rebuttal coverage, decision letters | ⏳ started (2026-07-06) |
 | **D — Reach & compliance** | Alt-text, marketing/social/newsletter, SEO meta, DOAJ/archival, APC/dunning, ethics/data-availability/integrity, accessibility | 🔜 |
 
 **Recommended next step:** Preflight Bot (Stage 8) — with corrections now applied automatically and typesetting re-runs producing fresh PDFs, PDF/X conformance checking is the remaining gate before PROOF_REVIEW.
@@ -389,6 +395,15 @@ ACCEPTED (starving intake); LT 30s hard timeout aborting full-size chunks;
 IDML CMYK 0–100 emitted into xcolor's 0–1 model (near-black prints);
 LaTeX class-name normalization drift between generator and router;
 plus a stale May-era Postgres container shadowing port 5432.
+
+Gap-audit fixes (2026-07-06): `USER_INVITED` was sent by `publication.invite`
+but missing from the `NotificationJob` template enum — every invite email
+failed schema validation in the processor and died silently after retries;
+`makeDecision` never called `dispatchStageBots`, so decision transitions
+(REVISION_REQUIRED / ACCEPTED / REJECTED) bypassed the orchestrator contract;
+the `SUBMITTED` dispatch returned early when a submission had no uploaded
+assets, which would have skipped completeness checks for create-in-editor
+manuscripts (completeness now enqueues before the asset guard).
 
 ## 10. Operational Notes
 

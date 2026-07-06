@@ -55,6 +55,18 @@ const TEMPLATES: Record<string, (d: Record<string,unknown>) => { subject: string
     subject: `Copy Editing Assignment: ${d['title']}`,
     html: `<h2>You have been assigned to copy edit a manuscript</h2><p><strong>${d['title']}</strong></p><p><a href="${APP}/dashboard/copyediting">View assignment →</a></p>`,
   }),
+  COMPLETENESS_REPORT: (d) => {
+    const fails = Array.isArray(d['fails']) ? d['fails'] as string[] : []
+    const warns = Array.isArray(d['warns']) ? d['warns'] as string[] : []
+    return {
+      subject: `Action needed: your submission "${d['title']}" is incomplete`,
+      html: `<h2>Your submission needs attention</h2>
+<p>Our automated completeness check found problems with <strong>${d['title']}</strong> that will delay editorial review:</p>
+<ul>${fails.map(f => `<li><strong>${f}</strong></li>`).join('')}</ul>
+${warns.length ? `<p>Also worth reviewing:</p><ul>${warns.map(w => `<li>${w}</li>`).join('')}</ul>` : ''}
+<p><a href="${APP}/dashboard/submissions/${d['submissionId']}">Fix your submission →</a></p>`,
+    }
+  },
   USER_INVITED: (d) => ({
     subject: 'You have been invited to PubFlow',
     html: `<h2>Welcome to PubFlow${d['firstName'] ? `, ${d['firstName']}` : ''}!</h2>

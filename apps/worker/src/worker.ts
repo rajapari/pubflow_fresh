@@ -10,6 +10,7 @@ import { intakeProcessor }       from './processors/intake.js'
 import { copyeditProcessor }     from './processors/copyedit.js'
 import { templateProcessor }     from './processors/template.js'
 import { correctionProcessor }   from './processors/correction.js'
+import { revisionProcessor }     from './processors/revision.js'
 
 function parseRedisUrl(url: string) {
   try {
@@ -54,6 +55,7 @@ const workers = [
   new Worker(QUEUES.COPYEDIT,     copyeditProcessor,     { ...workerOpts, concurrency: 2 }),
   new Worker(QUEUES.TEMPLATE,     templateProcessor,     { ...workerOpts, concurrency: 2 }),
   new Worker(QUEUES.CORRECTION,   correctionProcessor,   { ...workerOpts, concurrency: 2 }),
+  new Worker(QUEUES.REVISION,     revisionProcessor,     { ...workerOpts, concurrency: 2 }),
 ]
 
 // Register the daily review-reminder cron job.
