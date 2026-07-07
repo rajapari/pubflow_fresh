@@ -130,13 +130,14 @@ export async function correctionProcessor(job: Job) {
     docEntry.data = Buffer.from(xml, 'utf8')
     const newDocx = writeZip(entries)
 
-    // New numbered version; the proofed version stays immutable in history
+    // New numbered version in the SAME folder as the source manuscript
+    // (tenant/publisher/journal/submission tree); proofed version stays immutable.
     const filename = manuscript.minioKey.split('/').pop() ?? 'manuscript.docx'
-    const sub      = await prisma.submission.findUniqueOrThrow({
-      where: { id: submissionId }, select: { tenantId: true },
-    })
+    const dir      = manuscript.minioKey.includes('/')
+      ? manuscript.minioKey.slice(0, manuscript.minioKey.lastIndexOf('/'))
+      : ''
     const hash   = crc32(newDocx).toString(16).padStart(8, '0')
-    const newKey = `${sub.tenantId}/${submissionId}/corrected-${Date.now()}-${hash}-${filename}`
+    const newKey = `${dir ? dir + '/' : ''}corrected-${Date.now()}-${hash}-${filename}`
     await uploadToMinio(newKey, newDocx,
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 

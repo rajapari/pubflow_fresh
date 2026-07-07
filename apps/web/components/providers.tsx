@@ -25,6 +25,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     defaultOptions: {
       queries: {
         staleTime: 60_000,
+        // Don't refetch every query whenever the browser window regains
+        // focus — it made pages visibly "reload" on each window switch.
+        refetchOnWindowFocus: false,
         retry: (failureCount, error) => {
           // Don't retry on auth errors
           if (error instanceof TRPCClientError && error.data?.httpStatus === 401) return false

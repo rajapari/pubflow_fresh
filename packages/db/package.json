@@ -9,7 +9,10 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio"
   },
-  "exports": { ".": "./generated/client/index.js" },
+  "exports": {
+    ".": "./generated/client/index.js",
+    "./catalog": "./catalog.mts"
+  },
   "dependencies": { "@prisma/client": "^5.20.0" },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -35,7 +35,7 @@ const STEP_FIELDS: Record<number, (keyof FormData)[]> = {
   3: ['coAuthors'],
 }
 
-const STEPS = ['Publication & Title', 'Abstract & Keywords', 'Co-Authors']
+const STEPS = ['Publisher & Title', 'Abstract & Keywords', 'Co-Authors']
 
 export default function NewSubmissionPage() {
   const router  = useRouter()
@@ -68,11 +68,25 @@ export default function NewSubmissionPage() {
 
   const keywords       = watch('keywords')
   const selectedPubId  = watch('publicationId')
-  const publications   = trpc.publication.list.useQuery()
-  const selectedPub    = trpc.publication.byId.useQuery(
-    { id: selectedPubId },
-    { enabled: !!selectedPubId }
-  )
+  const [publisherId, setPublisherId] = useState('')
+
+  // One query returns the whole publisher → journal tree; the journal
+  // dropdown is filtered client-side by the chosen publisher.
+  const catalogQ   = trpc.publication.listGrouped.useQuery(undefined, {
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  })
+  const publishers   = catalogQ.data ?? []
+  const selectedPublisher = publishers.find(p => p.id === publisherId)
+  const journals     = selectedPublisher?.publications ?? []
+  const selectedPub  = journals.find(j => j.id === selectedPubId)
+
+  const handlePublisherChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPublisherId(e.target.value)
+    // A journal from another publisher is no longer valid
+    setValue('publicationId', '', { shouldValidate: false })
+  }
+
   const createSubmission = trpc.submission.create.useMutation()
 
   // Validate current step's fields before advancing
@@ -137,52 +151,71 @@ export default function NewSubmissionPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 rounded-xl border border-gray-200 bg-white p-6">
 
-        {/* Step 1: Publication & Title */}
+        {/* Step 1: Publisher & Title */}
         {step === 1 && (
           <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Publication & Title</h2>
+            <h2 className="text-base font-semibold text-gray-900">Publisher & Title</h2>
+
             <Select
-              label="Publication"
-              {...register('publicationId')}
-              options={publications.data?.map((p) => ({ value: p.id, label: p.title })) ?? []}
-              error={errors.publicationId?.message}
-              disabled={publications.isLoading}
+              label="Publisher"
+              value={publisherId}
+              onChange={handlePublisherChange}
+              options={publishers.map(p => ({ value: p.id, label: p.name }))}
+              disabled={catalogQ.isLoading}
               required
             />
-            {publications.isLoading && (
-              <p className="text-xs text-gray-400 animate-pulse">Loading publications…</p>
+            {catalogQ.isLoading && (
+              <p className="text-xs text-gray-400 animate-pulse">Loading publishers…</p>
             )}
-            {!publications.isLoading && publications.data?.length === 0 && (
-              <p className="text-xs text-amber-600">No publications found. Please contact your administrator.</p>
+            {catalogQ.isError && (
+              <p className="text-xs text-red-600">
+                Could not load the publisher catalogue.{' '}
+                <button type="button" className="underline" onClick={() => catalogQ.refetch()}>Retry</button>
+              </p>
+            )}
+            {!catalogQ.isLoading && !catalogQ.isError && publishers.length === 0 && (
+              <p className="text-xs text-amber-600">No publishers found. Please contact your administrator.</p>
+            )}
+
+            <Select
+              label={selectedPublisher ? `Journal / Title (${selectedPublisher.name})` : 'Journal / Title'}
+              {...register('publicationId')}
+              options={journals.map(j => ({ value: j.id, label: j.title }))}
+              error={errors.publicationId?.message}
+              disabled={!publisherId}
+              required
+            />
+            {!publisherId && (
+              <p className="text-xs text-gray-400">Select a publisher to see its journals and book programs.</p>
             )}
 
             {/* Journal info card */}
-            {selectedPubId && selectedPub.data && (
+            {selectedPub && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-1">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-xs font-semibold text-gray-800">{(selectedPub.data as any).title}</p>
-                  <span className="shrink-0 text-xs text-gray-400 uppercase tracking-wide">{(selectedPub.data as any).type}</span>
+                  <p className="text-xs font-semibold text-gray-800">{selectedPub.title}</p>
+                  <span className="shrink-0 text-xs text-gray-400 uppercase tracking-wide">{selectedPub.type}</span>
                 </div>
-                {((selectedPub.data as any).issn || (selectedPub.data as any).isbn) && (
+                {(selectedPub.issn || selectedPub.isbn) && (
                   <p className="text-xs text-gray-500">
-                    {(selectedPub.data as any).issn ? `ISSN ${(selectedPub.data as any).issn}` : `ISBN ${(selectedPub.data as any).isbn}`}
+                    {selectedPub.issn ? `ISSN ${selectedPub.issn}` : `ISBN ${selectedPub.isbn}`}
                   </p>
                 )}
-                {(selectedPub.data as any).description && (
-                  <p className="text-xs text-gray-600">{(selectedPub.data as any).description}</p>
+                {selectedPub.description && (
+                  <p className="text-xs text-gray-600">{selectedPub.description}</p>
                 )}
               </div>
             )}
 
             {/* Submission guidelines for the selected publication */}
-            {selectedPubId && (selectedPub.data as any)?.submissionGuidelines && (
+            {selectedPub?.submissionGuidelines && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <AlertCircle size={14} className="text-amber-600 shrink-0" />
                   <p className="text-xs font-semibold text-amber-800">Submission Guidelines</p>
                 </div>
                 <pre className="text-xs text-amber-900 whitespace-pre-wrap font-sans leading-relaxed">
-                  {(selectedPub.data as any).submissionGuidelines}
+                  {selectedPub.submissionGuidelines}
                 </pre>
                 <p className="mt-2 text-xs text-amber-700 font-medium">
                   Please read the guidelines above before continuing.

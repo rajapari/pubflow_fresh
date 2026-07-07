@@ -251,7 +251,8 @@ export const submissionRouter = router({
       // while the submitted version stays untouched in the history.
       if (latest) {
         const filename  = latest.minioKey.split('/').pop() ?? 'manuscript.docx'
-        const newKey    = MinioStorage.buildKey(user.tenantId, input.id, filename)
+        // Same folder as the source manuscript — all versions stay together
+        const newKey    = MinioStorage.siblingKey(latest.minioKey, filename)
         const buffer    = await minio.download(latest.minioKey)
         await minio.putObject(newKey, buffer)
 
@@ -350,7 +351,8 @@ export const submissionRouter = router({
           })
           if (latest) {
             const filename = latest.minioKey.split('/').pop() ?? 'manuscript.docx'
-            const newKey   = MinioStorage.buildKey(user.tenantId, input.submissionId, filename)
+            // Same folder as the source manuscript — all versions stay together
+            const newKey   = MinioStorage.siblingKey(latest.minioKey, filename)
             const buffer   = await minio.download(latest.minioKey)
             await minio.putObject(newKey, buffer)
             await prisma.$transaction([
@@ -410,10 +412,15 @@ export const submissionRouter = router({
       const { user, prisma, minio, queues } = ctx
       const sub = await prisma.submission.findFirst({
         where: { id: input.submissionId, tenantId: user.tenantId },
+        include: { publication: { select: { title: true, publisher: { select: { name: true } } } } },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      const key = MinioStorage.buildKey(user.tenantId, input.submissionId, input.filename)
+      // Folder tree mirrors the editorial hierarchy: tenant/publisher/journal/submission
+      const key = MinioStorage.buildKey(user.tenantId, input.submissionId, input.filename, {
+        publisher: sub.publication?.publisher?.name,
+        journal:   sub.publication?.title,
+      })
       const uploadUrl = await minio.getPresignedUrl(key)
 
       const fmtMap: Record<string, string> = {
@@ -520,6 +527,7 @@ export const submissionRouter = router({
       const { user, prisma, minio } = ctx
       const sub = await prisma.submission.findFirst({
         where: { id: input.submissionId, tenantId: user.tenantId },
+        include: { publication: { select: { title: true, publisher: { select: { name: true } } } } },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
 
@@ -531,7 +539,10 @@ export const submissionRouter = router({
 
       const docxBuffer = createBlankDocxBuffer()
       const filename   = `manuscript-${Date.now()}.docx`
-      const key        = MinioStorage.buildKey(user.tenantId, input.submissionId, filename)
+      const key        = MinioStorage.buildKey(user.tenantId, input.submissionId, filename, {
+        publisher: sub.publication?.publisher?.name,
+        journal:   sub.publication?.title,
+      })
 
       await minio.putObject(
         key,

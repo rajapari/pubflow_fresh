@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure } from '../trpc/procedures.js'
+import { MinioStorage } from '../plugins/minio.js'
 
 export const assetRouter = router({
   // List assets for a submission
@@ -61,6 +62,7 @@ export const assetRouter = router({
     .mutation(async ({ ctx, input }) => {
       const submission = await ctx.prisma.submission.findUniqueOrThrow({
         where: { id: input.submissionId },
+        include: { publication: { select: { title: true, publisher: { select: { name: true } } } } },
       })
 
       // Only author and artwork editor can upload
@@ -76,7 +78,14 @@ export const assetRouter = router({
         throw new Error(`Asset upload not allowed while submission is ${submission.status}`)
       }
 
-      const minioKey = `assets/${input.submissionId}/${Date.now()}_${input.filename}`
+      // Assets live under the same publisher/journal tree as the manuscript:
+      // {tenant}/{publisher}/{journal}/{submission}/assets/{file}
+      const minioKey = MinioStorage.buildKey(
+        submission.tenantId, input.submissionId, input.filename, {
+          publisher: submission.publication?.publisher?.name,
+          journal:   submission.publication?.title,
+          subfolder: 'assets',
+        })
 
       const url = await ctx.minio.getPresignedUrl(minioKey)
 

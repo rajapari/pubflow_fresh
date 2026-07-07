@@ -103,13 +103,53 @@ export class MinioStorage {
     })
   }
 
-  static buildKey(tenantId: string, submissionId: string, filename: string): string {
+  /** Filesystem-safe slug for folder names derived from publisher/journal titles. */
+  static slug(name: string): string {
+    return name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^\x20-\x7e]/g, '')   // strip accents/non-ASCII after NFKD
+      .replace(/&/g, 'and')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'untitled'
+  }
+
+  /**
+   * Object key for submission files. When publisher/journal metadata is
+   * available the folder tree mirrors the editorial hierarchy:
+   *   {tenantId}/{publisher}/{journal}/{submissionId}/{hash}.{ext}
+   * Legacy fallback (no metadata): {tenantId}/{submissionId}/{hash}.{ext}
+   */
+  static buildKey(
+    tenantId: string,
+    submissionId: string,
+    filename: string,
+    meta?: { publisher?: string | null; journal?: string | null; subfolder?: string },
+  ): string {
     const ext  = filename.split('.').pop() ?? 'bin'
     const hash = createHash('sha256')
       .update(`${tenantId}:${submissionId}:${filename}:${Date.now()}`)
       .digest('hex')
       .slice(0, 16)
-    return `${tenantId}/${submissionId}/${hash}.${ext}`
+    const leaf = meta?.subfolder ? `${meta.subfolder}/${hash}.${ext}` : `${hash}.${ext}`
+    if (meta?.journal) {
+      const publisher = MinioStorage.slug(meta.publisher ?? 'independent')
+      return `${tenantId}/${publisher}/${MinioStorage.slug(meta.journal)}/${submissionId}/${leaf}`
+    }
+    return `${tenantId}/${submissionId}/${leaf}`
+  }
+
+  /** New object key in the SAME folder as an existing one (version snapshots,
+   *  corrected copies) so all files of a submission stay physically together. */
+  static siblingKey(existingKey: string, filename: string): string {
+    const dir  = existingKey.includes('/') ? existingKey.slice(0, existingKey.lastIndexOf('/')) : ''
+    const ext  = filename.split('.').pop() ?? 'bin'
+    const hash = createHash('sha256')
+      .update(`${existingKey}:${filename}:${Date.now()}`)
+      .digest('hex')
+      .slice(0, 16)
+    return dir ? `${dir}/${hash}.${ext}` : `${hash}.${ext}`
   }
 }
 

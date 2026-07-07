@@ -3,14 +3,35 @@ import { TRPCError } from '@trpc/server'
 import { router, publicProcedure, protectedProcedure, chiefEditorProcedure, adminProcedure } from '../trpc/procedures.js'
 import { QUEUES } from '@pubflow/types'
 import { createKeycloakUser } from '../lib/keycloak-admin.js'
-import { DEFAULT_PUBLICATIONS } from '../lib/default-publications.js'
+import { seedDefaultCatalog } from '../lib/default-publications.js'
 
 export const publicationRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     return ctx.prisma.publication.findMany({
       where:   { tenantId: ctx.user.tenantId, status: 'ACTIVE' },
-      include: { _count: { select: { submissions: true } } },
+      include: {
+        publisher: { select: { id: true, name: true } },
+        _count:    { select: { submissions: true } },
+      },
       orderBy: { title: 'asc' },
+    })
+  }),
+
+  // Publisher → journals tree for the submission wizard's cascading selects.
+  // One round trip; the client filters journals by the chosen publisher.
+  listGrouped: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.prisma.publisher.findMany({
+      where: { tenantId: ctx.user.tenantId },
+      select: {
+        id:   true,
+        name: true,
+        publications: {
+          where:   { status: 'ACTIVE' },
+          select:  { id: true, title: true, type: true, issn: true, isbn: true, description: true, submissionGuidelines: true },
+          orderBy: { title: 'asc' },
+        },
+      },
+      orderBy: { name: 'asc' },
     })
   }),
 
@@ -153,20 +174,9 @@ export const tenantRouter = router({
             status:    'ACTIVE',
           },
         })
-        // Seed the full catalogue of well-known publications so new tenants
-        // have a populated dropdown immediately without manual setup.
-        await tx.publication.createMany({
-          data: DEFAULT_PUBLICATIONS.map(p => ({
-            tenantId:    tenant.id,
-            title:       p.title,
-            type:        p.type as any,
-            issn:        'issn' in p ? (p.issn || undefined) : undefined,
-            isbn:        'isbn' in p ? (p.isbn || undefined) : undefined,
-            description: p.description,
-            status:      'ACTIVE',
-          })),
-          skipDuplicates: true,
-        })
+        // Seed the publisher → publication catalogue so new tenants have a
+        // populated cascading dropdown immediately without manual setup.
+        await seedDefaultCatalog(tx, tenant.id)
         return { tenant, user }
       })
 

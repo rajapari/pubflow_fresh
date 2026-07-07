@@ -3,7 +3,7 @@ import jwtPlugin from '@fastify/jwt'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { AuthUser } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
-import { DEFAULT_PUBLICATIONS } from '../lib/default-publications.js'
+import { seedDefaultCatalog } from '../lib/default-publications.js'
 
 // Extend @fastify/jwt namespace to accept our user shape
 declare module '@fastify/jwt' {
@@ -135,21 +135,10 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
                       firstName: true, lastName: true, orcid: true, role: true, status: true },
           })
 
-          // Seed the publications catalogue so the new tenant isn't empty
-          await prisma.publication.createMany({
-            data: DEFAULT_PUBLICATIONS.map(p => ({
-              tenantId:    tenant.id,
-              title:       p.title,
-              type:        p.type as any,
-              issn:        'issn' in p ? (p.issn || undefined) : undefined,
-              isbn:        'isbn' in p ? ((p as any).isbn || undefined) : undefined,
-              description: p.description,
-              status:      'ACTIVE',
-            })),
-            skipDuplicates: true,
-          })
+          // Seed the publisher → publication catalogue so the new tenant isn't empty
+          await seedDefaultCatalog(prisma, tenant.id)
 
-          app.log.info({ sub, email, role }, '✅ Auto-provisioned new user + seeded publications')
+          app.log.info({ sub, email, role }, '✅ Auto-provisioned new user + seeded catalogue')
         }
       }
 
@@ -166,25 +155,15 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
 
       if (dbUser.status !== 'ACTIVE') throw new Error('User suspended')
 
-      // Lazy-seed publications for any tenant that currently has none.
+      // Lazy-seed the publisher → publication catalogue for any tenant that
+      // has no publishers yet (also links pre-publisher publications by title).
       // The in-memory set means the COUNT query runs once per tenant per
       // process lifetime instead of on every authenticated request.
       if (!seededTenants.has(dbUser.tenantId)) {
-        const pubCount = await prisma.publication.count({ where: { tenantId: dbUser.tenantId } })
-        if (pubCount === 0) {
-          await prisma.publication.createMany({
-            data: DEFAULT_PUBLICATIONS.map(p => ({
-              tenantId:    dbUser!.tenantId,
-              title:       p.title,
-              type:        p.type as any,
-              issn:        'issn' in p ? (p.issn || undefined) : undefined,
-              isbn:        'isbn' in p ? ((p as any).isbn || undefined) : undefined,
-              description: p.description,
-              status:      'ACTIVE',
-            })),
-            skipDuplicates: true,
-          })
-          app.log.info({ tenantId: dbUser.tenantId }, '✅ Lazy-seeded publications for tenant')
+        const publisherCount = await prisma.publisher.count({ where: { tenantId: dbUser.tenantId } })
+        if (publisherCount === 0) {
+          await seedDefaultCatalog(prisma, dbUser.tenantId)
+          app.log.info({ tenantId: dbUser.tenantId }, '✅ Lazy-seeded publisher catalogue for tenant')
         }
         seededTenants.add(dbUser.tenantId)
       }
