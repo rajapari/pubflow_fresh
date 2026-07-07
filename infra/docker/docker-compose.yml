@@ -1,5 +1,19 @@
 name: pubflow
 
+# ── Resource profiles ──────────────────────────────────────────────────────
+# `pnpm docker:dev` starts only CORE services (no `profiles:` key below) —
+# postgres, redis, minio, keycloak, onlyoffice, mailpit. That's everything
+# the main submission/review/editing/publishing workflow needs.
+#
+# Two more services groups are opt-in via Compose profiles, because they were
+# measured (docker stats, 2026-07-07) to sit at 30-97% CPU each *even at
+# idle*, which was stalling the Docker Desktop API on an 8 GB dev machine:
+#   `tools`  — languagetool, idml       (copyedit bot / template-porting bot)
+#   `design` — penpot ×3                (IDML/InDesign template design tool)
+#   `search` — meilisearch              (not wired into the app yet)
+#
+# Start everything:      pnpm docker:dev:full
+# Start core + one group: docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools up -d
 networks:
   app:
   data:
@@ -12,6 +26,8 @@ volumes:
   meilisearch_data:
   keycloak_data:
   penpot_data:
+  onlyoffice_data:
+  onlyoffice_logs:
 
 services:
 
@@ -72,9 +88,12 @@ services:
     networks: [data, tools]
     restart: unless-stopped
 
+  # Not wired into apps/api or apps/worker yet — opt-in only (`--profile search`)
+  # so it doesn't cost CPU/RAM on every `pnpm docker:dev` before anything uses it.
   meilisearch:
     image: getmeili/meilisearch:v1.10
     container_name: pubflow_meilisearch
+    profiles: [search]
     environment:
       MEILI_MASTER_KEY: ${MEILISEARCH_API_KEY:-pubflow_search_key}
       MEILI_ENV: development
@@ -127,32 +146,57 @@ services:
       # header, S3/MinIO presigned downloads fail with 400 "request has multiple
       # authentication types" because the URL already carries query-string auth.
       JWT_HEADER: AuthorizationJwt
+    # Persists WOPI signing keys, user data, and logs across restarts (the
+    # image's own documented paths for this).
+    #
+    # NOT fixed here: every fresh container also spends several minutes at
+    # ~90-100% CPU regenerating font caches — literally `gzip -9` compressing
+    # ~200 files one at a time under /var/www/onlyoffice/documentserver/fonts
+    # (confirmed via `ps aux` 2026-07-07). That path is the image's own webroot,
+    # not a documented data-persistence path; mounting a volume over it (or
+    # suppressing OnlyOffice's GENERATE_FONTS step) needs a real test cycle to
+    # confirm document conversion still works before trusting it — not done
+    # blind. It's a slow, CPU-heavy, one-time-per-restart cost, but it finishes
+    # and settles (confirmed via supervisorctl — stable, not crash-looping).
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
     ports:
       - "8081:80"
     networks: [tools, app]
     restart: unless-stopped
 
+  # Only needed by the copyedit style bot (grammar/style suggestions).
+  # Measured ~97% CPU sustained even at idle (JVM) — opt-in (`--profile tools`).
   languagetool:
     image: erikvl87/languagetool:latest
     container_name: pubflow_languagetool
+    profiles: [tools]
     ports:
       - "8082:8010"
     networks: [tools]
     restart: unless-stopped
 
-  # InDesign IDML layout extractor — feeds the template-porting bot.
+  # InDesign IDML layout extractor — feeds the template-porting bot only.
+  # Cheap on its own, but grouped with `tools` since it's used by the same
+  # niche production-editor workflow, not core submission/review/editing.
   idml:
     build:
       context: ../../services/idml
     container_name: pubflow_idml
+    profiles: [tools]
     ports:
       - "4100:4100"
     networks: [tools]
     restart: unless-stopped
 
+  # Design-tool suite for the IDML/template-porting workflow. Three JVM/BEAM
+  # containers; measured 30-50% CPU each sustained even at idle. Opt-in only
+  # (`--profile design`) — not needed for core submission/review/editing/publish.
   penpot-frontend:
     image: penpotapp/frontend:latest
     container_name: pubflow_penpot
+    profiles: [design]
     environment:
       PENPOT_FLAGS: enable-registration enable-login-with-password
     ports:
@@ -164,6 +208,7 @@ services:
   penpot-backend:
     image: penpotapp/backend:latest
     container_name: pubflow_penpot_backend
+    profiles: [design]
     environment:
       PENPOT_FLAGS: enable-registration enable-login-with-password
       # Same credential as the postgres service above — must stay identical.
@@ -184,6 +229,7 @@ services:
   penpot-exporter:
     image: penpotapp/exporter:latest
     container_name: pubflow_penpot_exporter
+    profiles: [design]
     environment:
       PENPOT_PUBLIC_URI: http://penpot-frontend
       PENPOT_FLAGS: enable-registration enable-login-with-password

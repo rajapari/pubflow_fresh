@@ -14,9 +14,12 @@
     "db:studio": "pnpm --filter @pubflow/db db:studio",
     "test:users": "node scripts/create-test-users.js",
     "docker:dev": "docker compose --env-file .env -f infra/docker/docker-compose.yml up -d",
-    "docker:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml down",
+    "docker:dev:full": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools --profile design --profile search up -d",
+    "docker:dev:tools": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools up -d",
+    "docker:dev:design": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile design up -d",
+    "docker:down": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools --profile design --profile search down",
     "docker:logs": "docker compose --env-file .env -f infra/docker/docker-compose.yml logs -f",
-    "docker:reset": "docker compose --env-file .env -f infra/docker/docker-compose.yml down -v && docker compose --env-file .env -f infra/docker/docker-compose.yml up -d"
+    "docker:reset": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools --profile design --profile search down -v && docker compose --env-file .env -f infra/docker/docker-compose.yml up -d"
   },
   "devDependencies": {
     "turbo": "^2.3.0",
