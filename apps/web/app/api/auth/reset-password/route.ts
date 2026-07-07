@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireEnv } from '@/lib/env'
 
 const KC_URL        = process.env.NEXT_PUBLIC_KEYCLOAK_URL    ?? 'http://localhost:8080'
 const KC_REALM      = process.env.NEXT_PUBLIC_KEYCLOAK_REALM  ?? 'pubflow'
 const KC_ADMIN_USER = process.env.KEYCLOAK_ADMIN_USER         ?? 'admin'
-const KC_ADMIN_PASS = process.env.KEYCLOAK_ADMIN_PASSWORD     ?? 'Admin@PubFlow2025'
 
 async function getAdminToken(): Promise<string> {
+  // No fallback password: a well-known default here would let anyone with
+  // the source code authenticate as the Keycloak realm admin.
+  const adminPassword = requireEnv('KEYCLOAK_ADMIN_PASSWORD')
   const r = await fetch(`${KC_URL}/realms/master/protocol/openid-connect/token`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'password', client_id: 'admin-cli',
-      username: KC_ADMIN_USER, password: KC_ADMIN_PASS,
+      username: KC_ADMIN_USER, password: adminPassword,
     }),
   })
   const d = await r.json()

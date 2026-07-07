@@ -21,7 +21,10 @@ services:
     container_name: pubflow_postgres
     environment:
       POSTGRES_USER: pubflow
-      POSTGRES_PASSWORD: pubflow_secret
+      # Must match the password embedded in DATABASE_URL (root .env) — they
+      # are two views of one credential. Defaulted for local dev; override
+      # both together for any non-local deployment.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pubflow_secret}
       POSTGRES_DB: pubflow
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -57,8 +60,10 @@ services:
     container_name: pubflow_minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: pubflow_minio
-      MINIO_ROOT_PASSWORD: pubflow_minio_secret
+      # Reuses the same names the app reads for its own MinIO client (root
+      # .env) so container and app credentials can never drift apart.
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-pubflow_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-pubflow_minio_secret}
     volumes:
       - minio_data:/data
     ports:
@@ -89,7 +94,8 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/pubflow
       KC_DB_USERNAME: pubflow
-      KC_DB_PASSWORD: pubflow_secret
+      # Same credential as the postgres service above — must stay identical.
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-pubflow_secret}
       KC_DB_SCHEMA: keycloak
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-Admin@PubFlow2025}
@@ -160,9 +166,10 @@ services:
     container_name: pubflow_penpot_backend
     environment:
       PENPOT_FLAGS: enable-registration enable-login-with-password
-      PENPOT_DATABASE_URI: postgresql://pubflow:pubflow_secret@postgres:5432/pubflow
+      # Same credential as the postgres service above — must stay identical.
+      PENPOT_DATABASE_URI: postgresql://pubflow:${POSTGRES_PASSWORD:-pubflow_secret}@postgres:5432/pubflow
       PENPOT_DATABASE_USERNAME: pubflow
-      PENPOT_DATABASE_PASSWORD: pubflow_secret
+      PENPOT_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-pubflow_secret}
       PENPOT_REDIS_URI: redis://redis:6379/2
       PENPOT_STORAGE_BACKEND: fs
       PENPOT_STORAGE_FS_DIRECTORY: /opt/data/assets

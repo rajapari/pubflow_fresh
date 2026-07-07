@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import fp from 'fastify-plugin'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { prisma } from '../lib/prisma.js'
+import { requireEnv } from '../lib/env.js'
 
 function verifyJwt(token: string, secret: string): boolean {
   const parts = token.split('.')
@@ -154,9 +155,18 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
       // Verify OnlyOffice JWT if present. The Document Server sends it in the
       // header configured by JWT_HEADER (AuthorizationJwt — renamed so MinIO
       // presigned downloads don't see two auth mechanisms at once).
-      const jwtSecret = process.env.ONLYOFFICE_JWT_SECRET ?? 'pubflow_onlyoffice_secret'
       const authHeader = (req.headers['authorizationjwt'] ?? req.headers['authorization']) as string | undefined
       if (authHeader) {
+        // No fallback secret: falling back to a well-known default would let
+        // anyone forge a callback that overwrites a manuscript. If the secret
+        // isn't configured we cannot verify authenticity, so fail closed.
+        let jwtSecret: string
+        try {
+          jwtSecret = requireEnv('ONLYOFFICE_JWT_SECRET')
+        } catch {
+          app.log.error({ submissionId }, 'OnlyOffice callback: ONLYOFFICE_JWT_SECRET not configured — rejecting unverifiable request')
+          return reply.code(500).send({ error: 1 })
+        }
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader
         if (!verifyJwt(token, jwtSecret)) {
           app.log.warn({ submissionId }, 'OnlyOffice callback JWT verification failed')

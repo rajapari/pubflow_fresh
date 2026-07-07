@@ -7,6 +7,7 @@ import { CreateSubmissionSchema, EditorialDecisionSchema,
 import { MinioStorage } from '../plugins/minio.js'
 import { QUEUES } from '@pubflow/types'
 import { dispatchStageBots } from '../lib/bot-dispatch.js'
+import { requireEnv } from '../lib/env.js'
 import { createHmac } from 'crypto'
 import { Client as MinioClient } from 'minio'
 
@@ -700,8 +701,18 @@ export const submissionRouter = router({
       // OnlyOffice caches documents by key; use manuscript.id so a new upload gets a fresh key.
       const docKey = manuscript.id.replace(/-/g, '')
 
-      // Fallback matches docker-compose.yml's ${ONLYOFFICE_JWT_SECRET:-pubflow_onlyoffice_secret}
-      const jwtSecret    = process.env.ONLYOFFICE_JWT_SECRET || 'pubflow_onlyoffice_secret'
+      // No fallback: a well-known default secret would let anyone forge a
+      // valid editor token. If this throws, the API's own startup check
+      // (plugins/onlyoffice-check.ts) already logged why it's misconfigured.
+      let jwtSecret: string
+      try {
+        jwtSecret = requireEnv('ONLYOFFICE_JWT_SECRET')
+      } catch {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Document editor is not configured (ONLYOFFICE_JWT_SECRET missing). Contact your administrator.',
+        })
+      }
       // ONLYOFFICE_CALLBACK_URL should point to the API using a host reachable from inside Docker
       // (e.g. http://host.docker.internal:3001 on Windows/Mac)
       const callbackBase = process.env.ONLYOFFICE_CALLBACK_URL ?? process.env.API_URL ?? 'http://localhost:3001'
