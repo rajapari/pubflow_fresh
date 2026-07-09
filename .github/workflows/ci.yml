@@ -175,10 +175,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # No cluster wired up yet — skip cleanly instead of failing red so CI
+      # signal stays meaningful. Add the KUBECONFIG repo secret to enable.
+      # `secrets` isn't usable directly in step `if:` expressions, so route
+      # it through env: (always supported) into a step output instead.
+      - name: Check for KUBECONFIG secret
+        id: check-kubeconfig
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+        run: |
+          if [ -n "$KUBECONFIG_DATA" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up kubectl
+        if: steps.check-kubeconfig.outputs.present == 'true'
         uses: azure/setup-kubectl@v4
 
       - name: Deploy via Helm
+        if: steps.check-kubeconfig.outputs.present == 'true'
         env:
           KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
         run: |
