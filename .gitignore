@@ -16,3 +16,4 @@ coverage
 infra/docker/.volumes
 __pycache__/
 *.tsbuildinfo
+/backups/

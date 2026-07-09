@@ -673,6 +673,13 @@ model Output {
   generatedAt   DateTime?
   createdAt     DateTime     @default(now())
 
+  // Preflight Bot (PDF/X conformance, embedded fonts, trim/bleed boxes).
+  // NULL until the bot runs (or for non-PDF_PRINT formats, which never get
+  // one). Shape: { status: 'pending'|'error'|'pass'|'warn'|'fail', checks: [...],
+  // error?: string, ranAt: ISO string } — one field, matching the
+  // CopyEdit.botReport / LayoutTemplate.spec precedent elsewhere in this schema.
+  preflightReport Json?
+
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
 
   proofReviews ProofReview[]

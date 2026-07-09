@@ -59,10 +59,14 @@ describe('dispatchStageBots', () => {
     expect(data.files.every((f) => Boolean(f.assetId))).toBe(true)
   })
 
-  it('SUBMITTED with no assets is a no-op', async () => {
+  it('SUBMITTED with no assets still runs completeness but skips intake classification', async () => {
     await prisma.asset.deleteMany({ where: { submissionId: fx.submissionId } })
     await dispatchStageBots(prisma, queues, fx.submissionId, 'SUBMITTED')
-    expect(await drainLatestJob(QUEUES.INTAKE)).toBeNull()
+    // Completeness runs unconditionally (even for create-in-editor submissions
+    // that uploaded nothing) — but with zero assets there's nothing to classify.
+    const job = await drainLatestJob(QUEUES.INTAKE)
+    expect(job).not.toBeNull()
+    expect((job!.data as { type: string }).type).toBe('COMPLETENESS')
   })
 
   it('statuses without bots are no-ops', async () => {

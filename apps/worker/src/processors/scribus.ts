@@ -1,8 +1,12 @@
 import type { Job } from 'bullmq'
 import type { Prisma } from '@pubflow/db'
-import { ScribusJobSchema } from '@pubflow/types'
+import { ScribusJobSchema, QUEUES } from '@pubflow/types'
+import { Queue } from 'bullmq'
 import { prisma } from '../lib/prisma.js'
 import { downloadFromMinio, uploadToMinio } from '../lib/storage.js'
+import { getConnection } from '../lib/redis-connection.js'
+
+const preflightQueue = new Queue(QUEUES.PREFLIGHT, { connection: getConnection() })
 
 export async function scribusProcessor(job: Job) {
   const d = ScribusJobSchema.parse(job.data)
@@ -15,7 +19,7 @@ export async function scribusProcessor(job: Job) {
       ...d.assetMinioKeys.map(k => downloadFromMinio(k)),
     ])
 
-    const res = await fetch(`${process.env.SCRIBUS_SERVICE_URL ?? 'http://localhost:5004'}/layout`, {
+    const res = await fetch(`${process.env.SCRIBUS_SERVICE_URL ?? 'http://localhost:5000'}/layout`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -42,7 +46,7 @@ export async function scribusProcessor(job: Job) {
     await uploadToMinio(outputKey, pdf, 'application/pdf')
 
     const hasErrors = (result.errors ?? []).length > 0
-    await prisma.output.update({
+    const updatedOutput = await prisma.output.update({
       where: { id: d.outputId },
       data: {
         status: hasErrors ? 'FAILED' : 'COMPLETED',
@@ -52,6 +56,15 @@ export async function scribusProcessor(job: Job) {
         errorMessage: hasErrors ? (result.errors ?? []).join('\n') : null,
       },
     })
+
+    if (!hasErrors && updatedOutput.format === 'PDF_PRINT') {
+      await preflightQueue.add('preflight', {
+        type: 'PREFLIGHT',
+        submissionId: d.submissionId,
+        outputId: d.outputId,
+        inputMinioKey: outputKey,
+      })
+    }
 
     // Log workflow state change
     await prisma.workflowLog.create({

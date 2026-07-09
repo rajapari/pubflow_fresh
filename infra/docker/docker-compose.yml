@@ -2,8 +2,9 @@ name: pubflow
 
 # ── Resource profiles ──────────────────────────────────────────────────────
 # `pnpm docker:dev` starts only CORE services (no `profiles:` key below) —
-# postgres, redis, minio, keycloak, onlyoffice, mailpit. That's everything
-# the main submission/review/editing/publishing workflow needs.
+# postgres, redis, minio, keycloak, onlyoffice, mailpit, plus the typesetting
+# pipeline (pandoc, latex, scribus, preflight). That's everything the main
+# submission/review/editing/typesetting/publishing workflow needs end to end.
 #
 # Two more services groups are opt-in via Compose profiles, because they were
 # measured (docker stats, 2026-07-07) to sit at 30-97% CPU each *even at
@@ -11,6 +12,10 @@ name: pubflow
 #   `tools`  — languagetool, idml       (copyedit bot / template-porting bot)
 #   `design` — penpot ×3                (IDML/InDesign template design tool)
 #   `search` — meilisearch              (not wired into the app yet)
+# pandoc/latex/scribus/preflight are Flask+gunicorn — near 0% CPU at idle,
+# no work until a job hits them — so they stay core despite that split.
+# `latex`'s image build is large (texlive-lang-all); the first build after a
+# fresh clone takes a while on that one layer.
 #
 # Start everything:      pnpm docker:dev:full
 # Start core + one group: docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools up -d
@@ -129,6 +134,50 @@ services:
       postgres:
         condition: service_healthy
     networks: [app, data]
+    restart: unless-stopped
+
+  # ── TYPESETTING PIPELINE ───────────────────────────────
+  # The core "Typesetting" pipeline stage (README) — format conversion + PDF
+  # composition + the pre-press gate. Genuinely core, not opt-in: every
+  # submission that reaches typesetting needs one of pandoc/latex/scribus,
+  # and every PDF_PRINT output needs preflight before it can reach
+  # PROOF_REVIEW. See the resource-profile note at the top of this file for
+  # why these stay in core despite the general resource-conscious split.
+  pandoc:
+    build:
+      context: ../../services/pandoc
+    container_name: pubflow_pandoc
+    ports:
+      - "4000:4000"
+    networks: [app]
+    restart: unless-stopped
+
+  latex:
+    build:
+      context: ../../services/latex
+    container_name: pubflow_latex
+    ports:
+      - "5001:5001"
+    networks: [app]
+    restart: unless-stopped
+
+  scribus:
+    build:
+      context: ../../services/scribus
+      dockerfile: Dockerfile.headless
+    container_name: pubflow_scribus
+    ports:
+      - "5000:5000"
+    networks: [app]
+    restart: unless-stopped
+
+  preflight:
+    build:
+      context: ../../services/preflight
+    container_name: pubflow_preflight
+    ports:
+      - "4200:4200"
+    networks: [app]
     restart: unless-stopped
 
   # ── TOOLS ──────────────────────────────────────────────

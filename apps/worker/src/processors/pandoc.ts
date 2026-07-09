@@ -10,7 +10,7 @@ export async function pandocProcessor(job: Job) {
   await prisma.output.update({ where: { id: d.outputId }, data: { status: 'PROCESSING', jobId: job.id } })
   try {
     const input = await downloadFromMinio(d.inputMinioKey)
-    const res = await fetch(`${process.env.PANDOC_SERVICE_URL ?? 'http://localhost:5005'}/convert`, {
+    const res = await fetch(`${process.env.PANDOC_SERVICE_URL ?? 'http://localhost:4000'}/convert`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

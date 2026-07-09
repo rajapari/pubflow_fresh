@@ -20,10 +20,76 @@ jobs:
       - run: pnpm --filter @pubflow/db db:generate
       - run: pnpm lint
 
+  test:
+    name: Test Suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @pubflow/db db:generate
+
+      # CI-only .env: same defaults documented in .env.example, no real
+      # secrets involved — these values never leave the ephemeral runner.
+      # Must match the docker-compose service credentials below exactly
+      # (same drift risk this project already hit once with OnlyOffice/Postgres).
+      - name: Write CI .env
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=pubflow_secret
+          DATABASE_URL=postgresql://pubflow:pubflow_secret@127.0.0.1:5432/pubflow
+          REDIS_URL=redis://127.0.0.1:6379/0
+          MINIO_ENDPOINT=127.0.0.1
+          MINIO_PORT=9000
+          MINIO_USE_SSL=false
+          MINIO_BUCKET=pubflow-files
+          MINIO_ACCESS_KEY=pubflow_minio
+          MINIO_SECRET_KEY=pubflow_minio_secret
+          LANGUAGETOOL_URL=http://127.0.0.1:8082
+          ANTHROPIC_API_KEY=
+          APP_URL=http://localhost:3000
+          API_URL=http://localhost:3001
+          EOF
+
+      # Reuses the same docker-compose.yml the app runs on locally — one
+      # source of truth for service images/ports, not a second definition
+      # that could silently drift from what dev/prod actually use.
+      - name: Start data services (postgres, redis, minio, languagetool)
+        run: |
+          docker compose --env-file .env -f infra/docker/docker-compose.yml \
+            --profile tools up -d postgres redis minio languagetool
+          docker compose --env-file .env -f infra/docker/docker-compose.yml \
+            up -d --wait postgres redis minio
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live && exit 0
+            sleep 2
+          done
+          echo "MinIO never became healthy" && exit 1
+
+      - run: pnpm --filter @pubflow/db db:migrate
+      - run: pnpm test
+
+      - name: Python service tests (no live server needed — Flask test client)
+        # Run separately: files share a test_server.py basename, so collecting
+        # them in one pytest invocation is a module-name collision.
+        run: |
+          pip install flask lxml pikepdf pytest
+          python -m pytest services/idml/test_server.py -q
+          python -m pytest services/latex/test_server.py -q
+          python -m pytest services/preflight/test_server.py -q
+
   deploy:
     name: Build & Deploy
     runs-on: ubuntu-latest
-    needs: check
+    needs: [check, test]
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name == 'push'
     permissions:
       contents: read

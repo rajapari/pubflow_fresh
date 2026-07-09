@@ -1,8 +1,12 @@
 import type { Job } from 'bullmq'
 import type { Prisma } from '@pubflow/db'
-import { LatexJobSchema } from '@pubflow/types'
+import { LatexJobSchema, QUEUES } from '@pubflow/types'
+import { Queue } from 'bullmq'
 import { prisma } from '../lib/prisma.js'
 import { downloadFromMinio, uploadToMinio } from '../lib/storage.js'
+import { getConnection } from '../lib/redis-connection.js'
+
+const preflightQueue = new Queue(QUEUES.PREFLIGHT, { connection: getConnection() })
 
 export async function latexProcessor(job: Job) {
   const d = LatexJobSchema.parse(job.data)
@@ -18,7 +22,7 @@ export async function latexProcessor(job: Job) {
       resources[clsName] = cls.toString('base64')
     }
 
-    const res = await fetch(`${process.env.LATEX_SERVICE_URL ?? 'http://localhost:5003'}/compile`, {
+    const res = await fetch(`${process.env.LATEX_SERVICE_URL ?? 'http://localhost:5001'}/compile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -44,7 +48,7 @@ export async function latexProcessor(job: Job) {
     const outputKey = `outputs/${d.submissionId}/submission_${d.outputId}.pdf`
     await uploadToMinio(outputKey, pdf, 'application/pdf')
 
-    await prisma.output.update({
+    const updatedOutput = await prisma.output.update({
       where: { id: d.outputId },
       data: {
         status: result.errors.length ? 'FAILED' : 'COMPLETED',
@@ -54,6 +58,18 @@ export async function latexProcessor(job: Job) {
         errorMessage: result.errors.length ? result.errors.join('\n') : null,
       },
     })
+
+    // PDF/X pre-press gate — only for print PDFs, only once compilation
+    // actually succeeded. submission.advanceStatus reads the report back
+    // before allowing the move into PROOF_REVIEW.
+    if (!result.errors.length && updatedOutput.format === 'PDF_PRINT') {
+      await preflightQueue.add('preflight', {
+        type: 'PREFLIGHT',
+        submissionId: d.submissionId,
+        outputId: d.outputId,
+        inputMinioKey: outputKey,
+      })
+    }
 
     // Log workflow state change
     await prisma.workflowLog.create({

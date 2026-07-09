@@ -158,6 +158,18 @@ export const CorrectionApplyJobSchema = z.object({
 })
 export type CorrectionApplyJob = z.infer<typeof CorrectionApplyJobSchema>
 
+// ── Preflight: pre-press PDF/X gate ───────────────────────
+// Runs against a completed PDF_PRINT Output (from the latex/scribus queues).
+// Blocks the submission's advance to PROOF_REVIEW until it reports 'pass'
+// or 'warn' — see submission.advanceStatus.
+export const PreflightJobSchema = z.object({
+  type: z.literal('PREFLIGHT'),
+  submissionId: z.string().uuid(),
+  outputId: z.string().uuid(),
+  inputMinioKey: z.string(),
+})
+export type PreflightJob = z.infer<typeof PreflightJobSchema>
+
 // LaTeX class names may only contain letters. Used by BOTH the template
 // generator (\ProvidesClass) and the typesetting router (documentClass +
 // .cls filename) — they must always agree or compilation breaks.
@@ -177,5 +189,6 @@ export const QUEUES = {
   TEMPLATE: 'template',
   CORRECTION: 'correction',
   REVISION: 'revision',
+  PREFLIGHT: 'preflight',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

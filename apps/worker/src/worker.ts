@@ -1,5 +1,6 @@
 import { Worker, Queue } from 'bullmq'
 import { QUEUES } from '@pubflow/types'
+import { initSentry, sentryEnabled, captureException } from './lib/sentry.js'
 import { pandocProcessor }       from './processors/pandoc.js'
 import { latexProcessor }        from './processors/latex.js'
 import { scribusProcessor }      from './processors/scribus.js'
@@ -11,6 +12,7 @@ import { copyeditProcessor }     from './processors/copyedit.js'
 import { templateProcessor }     from './processors/template.js'
 import { correctionProcessor }   from './processors/correction.js'
 import { revisionProcessor }     from './processors/revision.js'
+import { preflightProcessor }    from './processors/preflight.js'
 
 function parseRedisUrl(url: string) {
   try {
@@ -25,6 +27,10 @@ function parseRedisUrl(url: string) {
     return { host: 'localhost', port: 6379, password: undefined, db: 0 }
   }
 }
+
+initSentry()
+process.on('uncaughtException', (err) => { captureException(err, { source: 'uncaughtException' }) })
+process.on('unhandledRejection', (err) => { captureException(err, { source: 'unhandledRejection' }) })
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
 const redisConfig = parseRedisUrl(redisUrl)
@@ -56,6 +62,7 @@ const workers = [
   new Worker(QUEUES.TEMPLATE,     templateProcessor,     { ...workerOpts, concurrency: 2 }),
   new Worker(QUEUES.CORRECTION,   correctionProcessor,   { ...workerOpts, concurrency: 2 }),
   new Worker(QUEUES.REVISION,     revisionProcessor,     { ...workerOpts, concurrency: 2 }),
+  new Worker(QUEUES.PREFLIGHT,    preflightProcessor,    { ...workerOpts, concurrency: 3 }),
 ]
 
 // Register the daily review-reminder cron job.
@@ -79,12 +86,18 @@ workers.forEach((w) => {
   w.on('completed', (job) =>
     console.info(`✅ [${w.name}] Job ${job.id} completed`)
   )
-  w.on('failed', (job, err) =>
+  w.on('failed', (job, err) => {
     console.error(`❌ [${w.name}] Job ${job?.id} failed: ${err.message}`)
-  )
-  w.on('error', (err) =>
+    // Only report once retries are exhausted — a transient failure BullMQ
+    // will retry isn't an incident yet.
+    if ((job?.attemptsMade ?? 0) >= (job?.opts.attempts ?? 1)) {
+      captureException(err, { queue: w.name, jobId: job?.id, jobData: job?.data })
+    }
+  })
+  w.on('error', (err) => {
     console.error(`⚠️  [${w.name}] Worker error: ${err.message}`)
-  )
+    captureException(err, { queue: w.name, source: 'worker-error' })
+  })
 })
 
 async function shutdown() {
@@ -99,3 +112,4 @@ process.on('SIGINT',  shutdown)
 
 console.info('🚀 PubFlow workers started')
 console.info(`   Queues: ${Object.values(QUEUES).join(', ')}`)
+console.info(sentryEnabled() ? '✅ Sentry error tracking enabled' : 'ℹ️  Sentry disabled (SENTRY_DSN not set)')

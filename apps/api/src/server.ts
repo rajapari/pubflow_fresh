@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet'
 import rateLimit from '@fastify/rate-limit'
 import multipart from '@fastify/multipart'
 import sensible from '@fastify/sensible'
+import { initSentry, sentryEnabled, registerSentryErrorHandler, captureException } from './lib/sentry.js'
 import { authPlugin } from './plugins/auth.js'
 import { onlyofficeCheckPlugin } from './plugins/onlyoffice-check.js'
 import { minioPlugin } from './plugins/minio.js'
@@ -19,6 +20,11 @@ import { rssRoutes }     from './routes/rss.js'
 const PORT = Number(process.env.PORT ?? 3001)
 const HOST = process.env.HOST ?? '0.0.0.0'
 const IS_DEV = process.env.NODE_ENV !== 'production'
+
+// Init as early as possible so plugin-registration failures are also caught.
+initSentry()
+process.on('uncaughtException', (err) => { captureException(err, { source: 'uncaughtException' }) })
+process.on('unhandledRejection', (err) => { captureException(err, { source: 'unhandledRejection' }) })
 
 export async function buildServer() {
   const app = Fastify({
@@ -43,6 +49,9 @@ export async function buildServer() {
 
   // Register sensible (adds httpErrors used in auth plugin)
   await app.register(sensible)
+
+  registerSentryErrorHandler(app)
+  app.log.info(sentryEnabled() ? '✅ Sentry error tracking enabled' : 'ℹ️  Sentry disabled (SENTRY_DSN not set)')
 
   // NOTE: do NOT register @fastify/compress here — it breaks the tRPC fastify
   // adapter (the adapter replies with a fetch Response object that compress

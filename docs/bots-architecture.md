@@ -1,6 +1,6 @@
 # PubFlow Stage-Bot Architecture
 
-**Status:** Living specification · Last updated 2026-07-05
+**Status:** Living specification · Last updated 2026-07-09
 **Scope:** Automated "bots" (queue workers + AI assistants) supporting every stage of the publishing pipeline, from submission intake to post-publication marketing.
 
 Legend used throughout:
@@ -39,22 +39,35 @@ Legend used throughout:
                  ┌──────▼──────┐                ┌──────▼──────────────────┐
                  │  PostgreSQL │                │        Redis            │
                  └─────────────┘                │  queues: pandoc, latex, │
-                                                │  scribus, image, notif, │
+                                                │  scribus, preflight,   │
+                                                │  image, notif,          │
                                                 │  scheduler, intake,     │
-                                                │  copyedit, template     │
+                                                │  copyedit, template,    │
+                                                │  correction, revision   │
                                                 └──────┬──────────────────┘
                                                        │ BullMQ consume
                  ┌─────────────────────────────────────▼──────────┐
                  │              apps/worker (Node)                │
                  │  processors/* · lib/ai.ts · lib/style-manuals  │
                  │  lib/template-gen.ts · lib/storage.ts          │
-                 └──┬──────────┬──────────┬──────────┬────────────┘
-                    │          │          │          │
-              ┌─────▼───┐ ┌────▼────┐ ┌───▼────┐ ┌───▼────────────┐
-              │ Pandoc  │ │ LaTeX   │ │Scribus │ │ IDML extractor │  + LanguageTool,
-              │ :5005   │ │ :5003   │ │ :5000  │ │ :4100          │    MinIO, Anthropic API
-              └─────────┘ └─────────┘ └────────┘ └────────────────┘
+                 └──┬──────────┬──────────┬──────────┬─────┬──────┘
+                    │          │          │          │     │
+              ┌─────▼───┐ ┌────▼────┐ ┌───▼────┐ ┌───▼───┐ ┌▼───────────────┐
+              │ Pandoc  │ │ LaTeX   │ │Scribus │ │Preflt.│ │ IDML extractor │  + LanguageTool,
+              │ :4000   │ │ :5001   │ │ :5000  │ │ :4200 │ │ :4100          │    MinIO, Anthropic API
+              └─────────┘ └─────────┘ └────────┘ └───────┘ └────────────────┘
 ```
+
+All five typesetting/pre-press services (`pandoc`, `latex`, `scribus`,
+`preflight`, plus `idml` under `--profile tools`) are Dockerfiles under
+`services/` and are now actually wired into `infra/docker/docker-compose.yml`
+— until 2026-07-09 the first four existed as buildable services referenced by
+worker env vars but were **never added to docker-compose.yml**, so a fresh
+`pnpm docker:dev` could never actually run the typesetting pipeline. Fixed
+alongside the Preflight Bot build (§6). `services/scribus/Dockerfile.headless`
+also had a stale `COPY templates/ ./templates/` line referencing a directory
+that never existed in the repo — removed (nothing in `server.py` or
+`scripts/layout.py` reads from it; the template arrives in the request body).
 
 ### 2.1 Queues ✅
 
@@ -73,6 +86,7 @@ Defined in `packages/types/src/jobs.ts` (`QUEUES` const). The API's bull plugin 
 | `template` ✅ | `template.ts` | 2 | Publisher layout porting (IDML → Scribus/LaTeX) |
 | `correction` ✅ | `correction.ts` | 2 | Applies ACCEPTED proof corrections to the DOCX manuscript as a new version |
 | `revision` ✅ | `revision.ts` | 2 | Paragraph-level LCS diff between manuscript versions on author resubmission |
+| `preflight` ✅ | `preflight.ts` | 3 | PDF/X pre-press gate on PDF_PRINT outputs (fonts, trim/bleed, OutputIntent, print permission) — blocks PROOF_REVIEW on `fail` |
 
 The `intake` queue carries two job kinds: `INTAKE` (file classification) and `COMPLETENESS` (format & completeness checks) — the processor routes on `data.type`.
 
@@ -210,7 +224,7 @@ Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, 
 | **LaTeX / Scribus / Pandoc composition** | ✅ | Existing processors; `typesetting.triggerJob` routes by engine |
 | **Template Porting Bot** | ✅ | `processors/template.ts` + `services/idml` + `lib/template-gen.ts`. **IDML path:** IDML (zip of XML) → Python extractor (`POST /extract`, port 4100, lxml) returns neutral spec: page W×H, margins, bleed, columns+gutter, fonts, named colors (CMYK/RGB), paragraph/character styles (font, size, leading, alignment, spacing, indents) — with safe defaults (A4, 20 mm) so generators never see nulls. Generator emits **Scribus `.sla`** (document geometry, master page, color + STYLE defs, main text frame with columns) or **LaTeX `.cls`** (geometry, xcolor definitions, fontspec main font, per-style `\styleXxx{}` macros, multicol setup). **LaTeX path:** publisher `.cls`/`.tex` stored as-is + geometry sniffed into `spec`. **INDD/PDF:** fail fast with actionable guidance (export IDML / request source). Output → `LayoutTemplate.generatedMinioKey`, status READY. ~80% fidelity target; designer finalizes once per journal. |
 | **Template consumption** | ✅ | `triggerJob` accepts `templateId` (or resolves publication/tenant default): LATEX → `.cls` shipped as compile `resource`, `documentClass` = normalized template name (must equal generator's `\ProvidesClass`); SCRIBUS → `templateMinioKey` + `contentMinioKey` (template mandatory for Scribus). |
-| **Preflight Bot** | 🔜 | veraPDF/Ghostscript service: PDF/X conformance, fonts embedded, bleed/trim boxes; blocks PROOF_REVIEW on failure. |
+| **Preflight Bot** | ✅ | `processors/preflight.ts` + `services/preflight` (Flask + pikepdf, no JVM — deliberately lighter than a full ISO 15930 PDF/X validator like veraPDF; see the service docstring for the scope tradeoff). Auto-dispatched by `latex.ts`/`scribus.ts` whenever a job completes successfully **and** the `Output.format` is `PDF_PRINT`. Checks: embedded fonts (Base-14 exempt, subset-tag-aware, Type0/composite descendant-font aware), TrimBox presence (warn if absent) + BleedBox-encloses-TrimBox sanity (fail if not), PDF/X `OutputIntent` presence (warn if absent — presence only, not full conformance), print-permission on encrypted PDFs. Worst case across all pages wins; a corrupt/unopenable PDF fails fast on the integrity check alone. Report → `Output.preflightReport` (`{status: pending\|error\|pass\|warn\|fail, checks[], error?, ranAt}`). **Gate:** `submission.advanceStatus` refuses TYPESETTING → PROOF_REVIEW when the most recent COMPLETED PDF_PRINT output's report is missing/pending, `fail`, or `error`; `pass`/`warn` proceed; no PDF_PRINT output at all is not itself a block (publications that only ever produce PDF_WEB/EPUB aren't penalized). |
 | **Pagination QA Bot** | 🔜 | Parse LaTeX logs / Scribus output for overfull boxes, widows/orphans, overset text. |
 
 ### Stage 9 — Proof Review (author + editor) ✅
@@ -303,9 +317,10 @@ LatexJob         { ...existing, templateMinioKey?, templateClassName? }   // por
 CorrectionApplyJob { type:'CORRECTION_APPLY', submissionId, requestedById }
 CompletenessJob    { type:'COMPLETENESS', submissionId }                       // intake queue
 RevisionDiffJob    { type:'REVISION_DIFF', submissionId, fromVersion?, toVersion? }
+PreflightJob       { type:'PREFLIGHT', submissionId, outputId, inputMinioKey }
 ```
 
-Planned queues for 🔜 bots: `similarity`, `preflight`, `xmlvalidate`, `publish`, `marketing` — same recipe (schema + processor + Worker line).
+Planned queues for 🔜 bots: `similarity`, `xmlvalidate`, `publish`, `marketing` — same recipe (schema + processor + Worker line).
 
 ---
 
@@ -313,16 +328,18 @@ Planned queues for 🔜 bots: `similarity`, `preflight`, `xmlvalidate`, `publish
 
 | Service | Port | Status | Used by |
 |---|---|---|---|
-| Pandoc (`services/pandoc`) | 5005 | ✅ | pandoc processor, copyedit text extraction |
-| LaTeX (`services/latex`) | 5003 | ✅ | latex processor. Accepts `source` **or** legacy `latex` key, optional `resources{filename:base64}` (ported `.cls`, `.bib`, logos — basename-sanitized), returns `{pdf, logs, errors[], metadata}` |
-| Scribus headless (`services/scribus`) | 5000 | ✅ | scribus processor (`.sla` + content JSON → PDF) |
-| **IDML extractor** (`services/idml`) | 4100 | ✅ | template processor. Flask+lxml, gunicorn; in docker-compose as `pubflow_idml` |
+| Pandoc (`services/pandoc`) | 4000 | ✅ | pandoc processor, copyedit text extraction. In docker-compose as `pubflow_pandoc` (core, 2026-07-09) |
+| LaTeX (`services/latex`) | 5001 | ✅ | latex processor. Accepts `source` **or** legacy `latex` key, optional `resources{filename:base64}` (ported `.cls`, `.bib`, logos — basename-sanitized), returns `{pdf, logs, errors[], metadata}`. In docker-compose as `pubflow_latex` (core, 2026-07-09); large image (`texlive-lang-all`) |
+| Scribus headless (`services/scribus`) | 5000 | ✅ | scribus processor (`.sla` + content JSON → PDF). In docker-compose as `pubflow_scribus` (core, 2026-07-09) |
+| **Preflight** (`services/preflight`) | 4200 | ✅ | preflight processor. Flask + pikepdf, gunicorn; in docker-compose as `pubflow_preflight` (core) |
+| **IDML extractor** (`services/idml`) | 4100 | ✅ | template processor. Flask+lxml, gunicorn; in docker-compose as `pubflow_idml` (`--profile tools`) |
 | LanguageTool | 8082 | ✅ | grammar router, copyedit bot |
 | MinIO | 9000 | ✅ | all file storage |
 | Anthropic API | — | ✅ | `lib/ai.ts` (all 🤖 bots) |
-| GROBID, veraPDF, epubcheck | — | 🔜 | metadata extraction, preflight, XML validation |
+| **Image processing** | 5002 | ⚠️ **gap** | `processors/image.ts` calls `IMAGE_SERVICE_URL` (default `localhost:5002`) for artwork QA (DPI/color-mode/ICC/thumbnails), but no `services/image` directory or docker-compose entry exists — unlike pandoc/latex/scribus, this one was never built at all, not just unwired. Every `ARTWORK_PROCESSING` image job will fail until this service is built. |
+| GROBID, epubcheck | — | 🔜 | metadata extraction, XML validation |
 
-Worker env vars: `REDIS_URL`, `DATABASE_URL`, `MINIO_*`, `PANDOC_SERVICE_URL`, `LATEX_SERVICE_URL`, `IDML_SERVICE_URL`, `LANGUAGETOOL_URL`, `ANTHROPIC_*` (§2.2).
+Worker env vars: `REDIS_URL`, `DATABASE_URL`, `MINIO_*`, `PANDOC_SERVICE_URL`, `LATEX_SERVICE_URL`, `SCRIBUS_SERVICE_URL`, `PREFLIGHT_SERVICE_URL`, `IDML_SERVICE_URL`, `LANGUAGETOOL_URL`, `ANTHROPIC_*` (§2.2). `IMAGE_SERVICE_URL` is read but has no backing service yet (see gap above).
 
 ---
 
@@ -346,11 +363,11 @@ All new endpoints are tenant-scoped and role-checked (author vs production staff
 | Phase | Contents | Status |
 |---|---|---|
 | **A — Foundations + 4 flagship bots** | Queues, schema, AI client, intake classifier, style-manual engine, template porting, proof workbench, orchestrator | ✅ **Done (2026-07-05)** |
-| **B — Close the production loop** | ✅ Correction Applier (Stage 10) · ✅ revision-round governance (max 3, per-round version snapshots) · ✅ stage-transition dispatch for COPY_EDITING/ARTWORK/TYPESETTING/PROOF_REVIEW · ✅ production-role seed users · 🔜 Preflight, XML/EPUB Validator, Issue Assembler | ⏳ **In progress (2026-07-06)** |
+| **B — Close the production loop** | ✅ Correction Applier (Stage 10) · ✅ revision-round governance (max 3, per-round version snapshots) · ✅ stage-transition dispatch for COPY_EDITING/ARTWORK/TYPESETTING/PROOF_REVIEW · ✅ production-role seed users · ✅ Preflight Bot + PROOF_REVIEW gate (2026-07-09) · 🔜 XML/EPUB Validator, Issue Assembler | ⏳ **In progress (2026-07-09)** |
 | **C — Editorial intelligence** | ✅ Format & Completeness Checker · ✅ Revision Diff Bot · 🔜 similarity check, reviewer matcher, AI screening, rebuttal coverage, decision letters | ⏳ started (2026-07-06) |
 | **D — Reach & compliance** | Alt-text, marketing/social/newsletter, SEO meta, DOAJ/archival, APC/dunning, ethics/data-availability/integrity, accessibility | 🔜 |
 
-**Recommended next step:** Preflight Bot (Stage 8) — with corrections now applied automatically and typesetting re-runs producing fresh PDFs, PDF/X conformance checking is the remaining gate before PROOF_REVIEW.
+**Recommended next step:** XML/EPUB Validator (Stage 11) — with Preflight now gating the print path, the JATS/EPUB output path has no equivalent pre-publish validation gate.
 
 ### Seeded workflow accounts (demo-journal tenant)
 
@@ -382,11 +399,21 @@ Suites live beside the code they verify; all run against the real local stack
 | Templates | `apps/worker/test/template.test.ts` | 13 | SLA well-formedness, geometry/color/style porting, class-name invariant, unit conversion, IDML→SLA e2e via live extractor |
 | Proof API | `apps/api/test/proofReview.test.ts` | 15 | Role matrix, label sequencing, correction validation, tenant isolation, submit lock (via `createCaller`) |
 | Orchestrator | `apps/api/test/botDispatch.test.ts` | 7 | Real Redis job payloads, no-op paths, never-throw contract, profile-priority dispatch |
+| Preflight gate | `apps/api/test/preflightGate.test.ts` | 8 | `advanceStatus` → PROOF_REVIEW: pass/warn allowed, fail/error/pending blocked, absent PDF_PRINT output not blocked, non-COMPLETED output ignored, most-recent-COMPLETED-wins ordering |
 | IDML service | `services/idml/test_server.py` | 6 | Synthetic-IDML extraction, defaults, corrupt/wrong-type rejection |
 | LaTeX service | `services/latex/test_server.py` | 5 | source/latex key contract, resource placement + traversal guard, response shape, pass clamping |
+| Preflight service | `services/preflight/test_server.py` | 15 | Fonts (Base-14 exempt, subset-tag stripping, Type0 descendants), trim/bleed sanity, PDF/X intent, encrypted print-permission, corrupt-PDF fast fail, multi-page worst-case, Flask route contract |
 
 Run: `pnpm --filter @pubflow/worker test`, `pnpm --filter @pubflow/api test`,
-`python -m pytest services/idml services/latex -q`.
+`python -m pytest services/idml/test_server.py -q`,
+`python -m pytest services/latex/test_server.py -q`,
+`python -m pytest services/preflight/test_server.py -q`
+(idml/latex/preflight run as separate invocations — `services/idml/test_server.py`
+and `services/latex/test_server.py` share a basename and collide if pytest
+collects them together). CI now runs the full worker/api/python suite on every
+push (`.github/workflows/ci.yml` `test` job, added 2026-07-09) against live
+Postgres/Redis/MinIO/LanguageTool containers — previously only lint/typecheck
+ran automatically and ~100 existing tests never executed in CI.
 
 Bugs found and fixed by this pass: `PROOF_READER` missing from auth role
 schema/hierarchy; hyphens not treated as filename word separators (GA
@@ -412,3 +439,5 @@ manuscripts (completeness now enqueues before the asset guard).
 - **Bot failure semantics:** processor throws → BullMQ retries (3 attempts, exponential 5 s backoff) → failure recorded on the owning row (`Output.errorMessage`, `LayoutTemplate.errorMessage`, `CopyEdit.botReport.error`) — never only in logs.
 - **Token-cost bounds:** intake vision ≤6 images ≤5 MB each; copyedit AI ≤60 k chars, ≤60 edits, temperature 0.
 - **Idempotency:** intake re-classification updates existing assets (`assetId`); cron registration uses fixed `jobId`; report keys are deterministic per copyedit.
+- **Error tracking (2026-07-09):** Sentry wired into api/web/worker behind `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN` (unset = fully inert, zero behavior change — same `aiEnabled()`-style gate pattern as §2.2). Worker reports on exhausted-retry job failures and worker-level errors, not every transient retry.
+- **Backup/restore (2026-07-09):** `scripts/backup.sh` / `scripts/restore.sh` — Postgres `pg_dump` + full MinIO bucket mirror, manifest-verified. Restore is dry-run by default, requires explicit `--force`. Full runbook: `docs/backup-restore.md`.

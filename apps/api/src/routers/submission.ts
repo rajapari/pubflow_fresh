@@ -838,6 +838,24 @@ export const submissionRouter = router({
       if (!isValidTransition(sub.status, input.toStatus))
         throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot transition from ${sub.status} to ${input.toStatus}` })
 
+      // Preflight gate: a PDF_PRINT output must have passed (or warned — not
+      // failed) preflight before the submission can move into PROOF_REVIEW.
+      // No PDF_PRINT output at all is not itself a block (some publications
+      // only ever produce PDF_WEB/EPUB), but a produced-and-failing one is.
+      if (input.toStatus === 'PROOF_REVIEW') {
+        const printOutput = await prisma.output.findFirst({
+          where: { submissionId: input.submissionId, format: 'PDF_PRINT', status: 'COMPLETED' },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (printOutput) {
+          const report = printOutput.preflightReport as { status?: string } | null
+          if (!report || report.status === 'pending')
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Preflight check has not completed yet for the print PDF — try again shortly.' })
+          if (report.status === 'fail' || report.status === 'error')
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Preflight check failed for the print PDF — fix the reported issues and re-run typesetting before moving to proof review.' })
+        }
+      }
+
       const updated = await prisma.submission.update({
         where: { id: input.submissionId },
         data: {
