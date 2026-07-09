@@ -9,6 +9,18 @@ const client = new MinioClient({
 })
 const BUCKET = process.env.MINIO_BUCKET ?? 'pubflow-files'
 
+// Idempotent — safe to call on every worker boot. The API's own bootstrap
+// (apps/api/src/plugins/minio.ts) creates this bucket too, but nothing
+// guarantees the API starts before the worker (independent processes,
+// independent k8s replicas), so relying on that ordering is a latent
+// NoSuchBucket bug waiting for a fresh deployment where the worker wins the
+// race. Also called from apps/worker/test/setup.ts so tests are self-
+// sufficient against a fresh MinIO (this is what CI hits).
+export async function ensureBucket(): Promise<void> {
+  const exists = await client.bucketExists(BUCKET)
+  if (!exists) await client.makeBucket(BUCKET, 'us-east-1')
+}
+
 export async function downloadFromMinio(key: string): Promise<Buffer> {
   const stream = await client.getObject(BUCKET, key)
   const chunks: Buffer[] = []

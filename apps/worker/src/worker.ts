@@ -13,6 +13,7 @@ import { templateProcessor }     from './processors/template.js'
 import { correctionProcessor }   from './processors/correction.js'
 import { revisionProcessor }     from './processors/revision.js'
 import { preflightProcessor }    from './processors/preflight.js'
+import { ensureBucket }          from './lib/storage.js'
 
 function parseRedisUrl(url: string) {
   try {
@@ -49,6 +50,11 @@ const workerOpts = {
   removeOnComplete: { count: 100 },
   removeOnFail:     { count: 500 },
 }
+
+// Must resolve before any worker starts picking up jobs — a job landing
+// mid-race against bucket creation is a NoSuchBucket failure, not a retry.
+await ensureBucket()
+console.info('✅ MinIO: bucket ready')
 
 const workers = [
   new Worker(QUEUES.PANDOC,       pandocProcessor,       { ...workerOpts, concurrency: 5 }),

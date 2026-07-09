@@ -185,8 +185,13 @@ describe('templateProcessor (DB + live IDML service)', () => {
     const { deflateRawSync } = await import('node:zlib')
     void deflateRawSync // (zip built via python for fidelity)
     const { execSync } = await import('node:child_process')
+    const { fileURLToPath } = await import('node:url')
+    const path = await import('node:path')
+    // Repo-root-relative, not a hardcoded dev-machine path — this runs on
+    // CI (Ubuntu) as well as any contributor's own checkout.
+    const idmlServiceDir = path.resolve(fileURLToPath(import.meta.url), '../../../../services/idml')
     const idmlB64 = execSync(
-      'python -c "import base64,sys; sys.path.insert(0,r\'D:/F-Drive/Authoring/pubflow_fresh/services/idml\'); from test_server import build_idml; print(base64.b64encode(build_idml()).decode())"',
+      `python -c "import base64,sys; sys.path.insert(0,r'${idmlServiceDir}'); from test_server import build_idml; print(base64.b64encode(build_idml()).decode())"`,
       { encoding: 'utf-8' },
     ).trim()
     const key = await uploadFixture(
