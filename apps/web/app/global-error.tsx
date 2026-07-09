@@ -17,7 +17,7 @@ export default function GlobalError({ error }: { error: Error & { digest?: strin
         <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', fontFamily: 'sans-serif' }}>
           <div style={{ textAlign: 'center' }}>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 600 }}>Something went wrong</h1>
-            <p style={{ color: '#666', marginTop: '0.5rem' }}>We've been notified and are looking into it.</p>
+            <p style={{ color: '#666', marginTop: '0.5rem' }}>We&apos;ve been notified and are looking into it.</p>
             <button
               onClick={() => window.location.reload()}
               style={{ marginTop: '1.5rem', padding: '0.5rem 1.5rem', borderRadius: '0.5rem', background: '#2563eb', color: 'white', border: 'none', cursor: 'pointer' }}

@@ -56,9 +56,9 @@ export default function SignupPage() {
       <div className="flex min-h-[60vh] items-center justify-center px-6">
         <div className="text-center max-w-md">
           <CheckCircle className="mx-auto mb-4 text-green-500" size={48} />
-          <h1 className="text-2xl font-bold text-gray-900">You're all set!</h1>
+          <h1 className="text-2xl font-bold text-gray-900">You&apos;re all set!</h1>
           <p className="mt-3 text-gray-500">
-            Check your email — we've sent you a link to set your password and activate your account.
+            Check your email — we&apos;ve sent you a link to set your password and activate your account.
           </p>
           <Link href="/dashboard" className="mt-6 inline-block rounded-lg bg-brand-500 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-600">
             Go to Dashboard
