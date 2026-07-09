@@ -1,3 +1,16 @@
+// PARKED, not routed: the `_` prefix excludes this from Next.js's App Router
+// entirely (no URL serves it). This was the original individual-user signup
+// (name/email/password -> Keycloak user, AUTHOR role, no tenant/org created)
+// and collided with app/(public)/signup/page.tsx (organization/tenant
+// registration -> trpc.tenant.register) at the same /signup URL, breaking
+// the production build ("two parallel pages... same path"). The org-
+// registration flow won /signup: every marketing-page CTA (pricing, features,
+// login, landing, etc.) points there, and pricing.tsx's plan tiers match its
+// STARTER/PROFESSIONAL/ENTERPRISE selector exactly. This individual-signup
+// flow is fully functional (creates a real Keycloak user via admin API) and
+// kept here rather than deleted in case a self-serve "join without creating
+// an org" flow is wanted later — apps/web/app/api/auth/register/route.ts is
+// its backend and is untouched.
 'use client'
 
 import Link from 'next/link'
