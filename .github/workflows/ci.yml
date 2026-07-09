@@ -22,6 +22,12 @@ jobs:
   test:
     name: Test Suites
     runs-on: ubuntu-latest
+    # Real env vars (not just the .env file written below) — `prisma migrate
+    # deploy` runs from packages/db and Prisma's own .env auto-load is
+    # directory-relative, so it never sees the root .env this job writes.
+    # Must match the values in that .env file exactly.
+    env:
+      DATABASE_URL: postgresql://pubflow:pubflow_secret@127.0.0.1:5432/pubflow
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
