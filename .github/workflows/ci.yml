@@ -52,6 +52,7 @@ jobs:
           ANTHROPIC_API_KEY=
           APP_URL=http://localhost:3000
           API_URL=http://localhost:3001
+          ONLYOFFICE_JWT_SECRET=ci_only_placeholder_secret
           EOF
 
       # Reuses the same docker-compose.yml the app runs on locally — one
