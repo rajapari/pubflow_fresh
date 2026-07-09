@@ -64,10 +64,12 @@ jobs:
       # Reuses the same docker-compose.yml the app runs on locally — one
       # source of truth for service images/ports, not a second definition
       # that could silently drift from what dev/prod actually use.
-      - name: Start data services (postgres, redis, minio, languagetool)
+      # idml is needed too: apps/worker/test/template.test.ts's live
+      # end-to-end test calls the real extractor at :4100, not a mock.
+      - name: Start data services (postgres, redis, minio, languagetool, idml)
         run: |
           docker compose --env-file .env -f infra/docker/docker-compose.yml \
-            --profile tools up -d postgres redis minio languagetool
+            --profile tools up -d postgres redis minio languagetool idml
           docker compose --env-file .env -f infra/docker/docker-compose.yml \
             up -d --wait postgres redis minio
 
@@ -78,6 +80,17 @@ jobs:
             sleep 2
           done
           echo "MinIO never became healthy" && exit 1
+
+      # idml has no compose healthcheck (same as minio above), and it builds
+      # from source rather than pulling a pre-built image, so it needs its
+      # own explicit readiness wait rather than relying on `--wait`.
+      - name: Wait for IDML extractor
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4100/health && exit 0
+            sleep 2
+          done
+          echo "IDML extractor never became healthy" && exit 1
 
       - run: pnpm --filter @pubflow/db db:migrate
 
