@@ -80,13 +80,21 @@ jobs:
           echo "MinIO never became healthy" && exit 1
 
       - run: pnpm --filter @pubflow/db db:migrate
+
+      # Must run before `pnpm test`: apps/worker/test/template.test.ts shells
+      # out to services/idml/test_server.py for its live-IDML-extractor test,
+      # and that file does `import pytest` at module level — so the import
+      # fails without pytest installed, even though pytest itself doesn't
+      # run until the separate step below.
+      - name: Install Python test dependencies
+        run: pip install flask lxml pikepdf pytest
+
       - run: pnpm test
 
       - name: Python service tests (no live server needed — Flask test client)
         # Run separately: files share a test_server.py basename, so collecting
         # them in one pytest invocation is a module-name collision.
         run: |
-          pip install flask lxml pikepdf pytest
           python -m pytest services/idml/test_server.py -q
           python -m pytest services/latex/test_server.py -q
           python -m pytest services/preflight/test_server.py -q
