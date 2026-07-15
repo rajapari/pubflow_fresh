@@ -1,11 +1,11 @@
 # Production Deploy Runbook
 
-**Status:** Phase 1 of 3. Covers everything needed for a *working* first
-deploy: auth (Keycloak), document editing (OnlyOffice), the core api/web/worker
-apps, and the data layer via managed cloud services. Phase 2 (the bot
-pipeline — pandoc/latex/scribus/preflight/image/idml) and Phase 3
-(LanguageTool) are **not yet in this chart** — see [Known gaps](#known-gaps-not-yet-covered)
-before you assume a full deploy is production-ready.
+**Status:** All 3 phases complete. Covers auth (Keycloak), document editing
+(OnlyOffice), the core api/web/worker apps, the full bot pipeline
+(pandoc/latex/scribus/preflight/image/idml), LanguageTool, and the data
+layer via managed cloud services. See [Known gaps](#known-gaps-not-yet-covered)
+for what's still genuinely outstanding (mostly things that need your actual
+cluster to exist before they can be verified end-to-end).
 
 Provider used throughout: **DigitalOcean**, chosen specifically because its
 Spaces object storage is genuinely S3-API-compatible — `apps/api/src/plugins/minio.ts`
@@ -132,8 +132,11 @@ workflow — fine only if that happens to be your real domain.
 
 ## 6. Deploy
 
-Push to `master`/`main`. CI's `deploy` job builds and pushes the `api`/`web`/
-`worker` images, then runs `helm upgrade --install`. Watch:
+Push to `master`/`main`. CI runs three build stages before Helm ever runs:
+`api`/`web`/`worker` images (the `deploy` job itself), then a separate
+`build-microservices` job (matrix build) pushes all six bot-pipeline images
+(`pandoc`, `latex`, `scribus`, `preflight`, `image`, `idml`) — `deploy` waits
+on that job before running `helm upgrade --install`. Watch:
 
 ```bash
 kubectl get pods -n pubflow -w
@@ -142,7 +145,9 @@ kubectl get pods -n pubflow -w
 **First deploy takes longer than usual** — Keycloak's realm import and
 OnlyOffice's font-cache generation (the same slow first-boot behavior
 documented for local dev in `infra/docker/docker-compose.yml`) both happen
-on first start.
+on first start, and `latex`'s image is large (`texlive-lang-all`) so its
+first pull can take a while too. The Helm timeout is set to 10 minutes to
+give all nine deployments room.
 
 ---
 
@@ -159,18 +164,17 @@ If `pubflow-onlyoffice` or `pubflow-keycloak` pods are stuck in
 
 ---
 
-## Known gaps (not yet covered)
+## Known gaps
 
-- **Phase 2 — bot pipeline missing entirely from this chart.** `pandoc`,
-  `latex`, `scribus`, `preflight`, `image`, `idml` have no Kubernetes
-  Deployments yet, even though `infra/helm/values.yaml`'s `config.*ServiceUrl`
-  entries already point at the in-cluster DNS names they'll need. Until
-  Phase 2 lands, typesetting/artwork-QA/template-porting jobs will fail —
-  the worker has nowhere to reach them. CI doesn't build or push their
-  images either.
-- **Phase 3 — LanguageTool missing.** Copyedit grammar checking degrades
-  gracefully without it (existing timeout/error handling in
-  `apps/worker/src/processors/copyedit.ts`), so this is lower priority.
+- **None of this has run against a real cluster yet.** Every template is
+  verified with `helm lint`/`helm template` (structural correctness, every
+  config/secret cross-reference checked by script) and the web image is
+  verified with a real local Docker build + boot + HTTP requests — but the
+  actual `helm upgrade` against a live DOKS cluster, the Keycloak realm
+  import, OnlyOffice's PVC behavior, and the bot-pipeline services actually
+  receiving and completing real jobs from the worker are all still
+  unverified until your cluster exists. Treat the first real deploy as a
+  first real test, not a formality.
 - **SMTP has no auth support.** `apps/worker/src/processors/notification.ts`
   only reads `SMTP_HOST`/`SMTP_PORT`/`SMTP_FROM` — no username/password.
   Most production relays (SendGrid, Postmark, SES) require auth. Untested

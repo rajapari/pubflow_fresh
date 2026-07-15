@@ -37,6 +37,51 @@ worker:
 onlyoffice:
   dataStorage: 5Gi
 
+# Bot-pipeline microservices (Phase 2). All six are stateless Flask+gunicorn
+# services with no external dependencies (no DB/Redis/secrets) and a uniform
+# `/health` route — templates/microservices.yaml renders one Deployment +
+# Service per entry via a single range, rather than six near-identical
+# files. `dockerfile` matters only for scribus, whose file is named
+# Dockerfile.headless (see services/scribus/) — everything else is the
+# default `Dockerfile`. Images are built by the build-microservices CI job
+# as ghcr.io/<owner>/pubflow/<key>:<tag>, matching api/web/worker's naming.
+microservices:
+  pandoc:
+    port: 4000
+    dockerfile: Dockerfile
+    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+  latex:
+    port: 5001
+    dockerfile: Dockerfile
+    # texlive-lang-all is a heavy compile step — give it real headroom.
+    resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: 2000m, memory: 2Gi } }
+  scribus:
+    port: 5000
+    dockerfile: Dockerfile.headless
+    resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { cpu: 1000m, memory: 1Gi } }
+  preflight:
+    port: 4200
+    dockerfile: Dockerfile
+    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+  image:
+    port: 5002
+    dockerfile: Dockerfile
+    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+  idml:
+    port: 4100
+    dockerfile: Dockerfile
+    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+
+# Copyedit grammar bot (Phase 3). Pre-built image (not something CI builds),
+# and JVM-based — this is the one flagged throughout this project's history
+# (docker-compose.yml, services/idml's own comments) as measuring ~97% CPU
+# sustained even at idle. Kept modest replica/resource defaults on purpose;
+# copyedit.ts already degrades gracefully if this is slow or unreachable.
+languagetool:
+  port: 8082
+  targetPort: 8010  # erikvl87/languagetool's actual listen port
+  resources: { requests: { cpu: 500m, memory: 512Mi }, limits: { cpu: 1500m, memory: 1Gi } }
+
 ingress:
   enabled: true
   className: nginx
@@ -104,22 +149,21 @@ config:
   # ── Print-on-demand ────────────────────────────────────
   luluPodPackageId: "0600X0900BWSTDSS060UW444MXX"
 
-  # ── Bot-pipeline microservices (Phase 2 — not yet deployed) ──────────────
-  # In-cluster DNS names templates/microservices.yaml (Phase 2) will create.
-  # Referencing them now means Phase 2 only has to add the Deployments/
-  # Services, not revisit this file. Until then these simply won't resolve —
-  # same graceful-missing-service story LANGUAGETOOL_URL already has below.
-  pandocServiceUrl: "http://pandoc.pubflow.svc.cluster.local:4000"
-  latexServiceUrl: "http://latex.pubflow.svc.cluster.local:5001"
-  scribusServiceUrl: "http://scribus.pubflow.svc.cluster.local:5000"
-  preflightServiceUrl: "http://preflight.pubflow.svc.cluster.local:4200"
-  imageServiceUrl: "http://image.pubflow.svc.cluster.local:5002"
-  idmlServiceUrl: "http://idml.pubflow.svc.cluster.local:4100"
+  # ── Bot-pipeline microservices (Phase 2) ────────────────────────────────
+  # In-cluster DNS names — must match templates/microservices.yaml's Service
+  # names exactly (pubflow-<name>, the same prefix convention every other
+  # Service in this chart uses — api, web, keycloak, onlyoffice).
+  pandocServiceUrl: "http://pubflow-pandoc.pubflow.svc.cluster.local:4000"
+  latexServiceUrl: "http://pubflow-latex.pubflow.svc.cluster.local:5001"
+  scribusServiceUrl: "http://pubflow-scribus.pubflow.svc.cluster.local:5000"
+  preflightServiceUrl: "http://pubflow-preflight.pubflow.svc.cluster.local:4200"
+  imageServiceUrl: "http://pubflow-image.pubflow.svc.cluster.local:5002"
+  idmlServiceUrl: "http://pubflow-idml.pubflow.svc.cluster.local:4100"
 
-  # ── Copyedit grammar bot (Phase 3 — not yet deployed) ────────────────────
+  # ── Copyedit grammar bot (Phase 3) ───────────────────────────────────────
   # Degrades gracefully when unreachable (copyedit.ts already handles LT
   # timeouts/errors) — lower priority than the pipeline services above.
-  languagetoolUrl: "http://languagetool.pubflow.svc.cluster.local:8082"
+  languagetoolUrl: "http://pubflow-languagetool.pubflow.svc.cluster.local:8082"
 
 # Every value here becomes a key in the pubflow-secrets K8s Secret
 # (templates/secret.yaml). Provide via `--set secrets.x=y` (CI does this

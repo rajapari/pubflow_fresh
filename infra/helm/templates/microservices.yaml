@@ -1,0 +1,60 @@
+# Six stateless Flask+gunicorn bot-pipeline services (pandoc/latex/scribus/
+# preflight/image/idml) — no DB/Redis/secrets, uniform /health route, one
+# Deployment + Service each, generated from a single range over
+# .Values.microservices rather than six near-identical files. Without these,
+# the worker has nowhere to reach any of the typesetting/artwork-QA/
+# template-porting pipeline — apps/worker/src/processors/*.ts's
+# *_SERVICE_URL calls would all fail.
+{{- $img := .Values.global.imageRegistry }}
+{{- $tag := .Values.global.imageTag }}
+{{- $ns := .Values.global.namespace }}
+{{- range $name, $svc := .Values.microservices }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-{{ $name }}
+  namespace: {{ $ns }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pubflow-{{ $name }}
+  template:
+    metadata:
+      labels:
+        app: pubflow-{{ $name }}
+        version: {{ $tag | quote }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: "{{ $img }}/{{ $name }}:{{ $tag }}"
+          ports:
+            - containerPort: {{ $svc.port }}
+          readinessProbe:
+            httpGet: { path: /health, port: {{ $svc.port }} }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: {{ $svc.port }} }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: {{ $svc.resources.requests.cpu }}
+              memory: {{ $svc.resources.requests.memory }}
+            limits:
+              cpu: {{ $svc.resources.limits.cpu }}
+              memory: {{ $svc.resources.limits.memory }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pubflow-{{ $name }}
+  namespace: {{ $ns }}
+spec:
+  selector: { app: pubflow-{{ $name }} }
+  ports:
+    - port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+---
+{{- end }}

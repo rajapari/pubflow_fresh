@@ -1,0 +1,47 @@
+# Grammar-check backend for the copyedit bot. Pre-built image — CI doesn't
+# build this one, unlike the six services/* microservices. No env
+# customization here beyond the image default, matching
+# infra/docker/docker-compose.yml's local-dev config exactly; JVM heap
+# sizing is a future tuning knob if this turns out to need it under real load.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-languagetool
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pubflow-languagetool
+  template:
+    metadata:
+      labels:
+        app: pubflow-languagetool
+    spec:
+      containers:
+        - name: languagetool
+          image: erikvl87/languagetool:latest
+          ports:
+            - containerPort: {{ .Values.languagetool.targetPort }}
+          readinessProbe:
+            httpGet: { path: /v2/languages, port: {{ .Values.languagetool.targetPort }} }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: {{ .Values.languagetool.resources.requests.cpu }}
+              memory: {{ .Values.languagetool.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.languagetool.resources.limits.cpu }}
+              memory: {{ .Values.languagetool.resources.limits.memory }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pubflow-languagetool
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector: { app: pubflow-languagetool }
+  ports:
+    - port: {{ .Values.languagetool.port }}
+      targetPort: {{ .Values.languagetool.targetPort }}
