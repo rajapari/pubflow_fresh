@@ -1,0 +1,84 @@
+{
+  "realm": "pubflow",
+  "enabled": true,
+  "displayName": "PubFlow",
+  "accessTokenLifespan": 28800,
+  "bruteForceProtected": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "SUPER_ADMIN"
+      },
+      {
+        "name": "EDITOR_IN_CHIEF"
+      },
+      {
+        "name": "SECTION_EDITOR"
+      },
+      {
+        "name": "COPY_EDITOR"
+      },
+      {
+        "name": "ARTWORK_EDITOR"
+      },
+      {
+        "name": "TYPESETTER"
+      },
+      {
+        "name": "PEER_REVIEWER"
+      },
+      {
+        "name": "AUTHOR"
+      },
+      {
+        "name": "READER"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "pubflow-web",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "directAccessGrantsEnabled": true
+    },
+    {
+      "clientId": "pubflow-api",
+      "enabled": true,
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "protocol": "openid-connect"
+    }
+  ],
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "noreply@pubflow.local",
+    "ssl": "false",
+    "starttls": "false"
+  },
+  "rememberMe": true,
+  "otpPolicyType": "totp",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "ssoSessionMaxLifespan": 86400,
+  "ssoSessionIdleTimeout": 28800
+}

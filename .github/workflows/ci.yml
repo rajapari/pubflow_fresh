@@ -161,6 +161,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # NEXT_PUBLIC_* vars are inlined into the client bundle at build time
+      # (see apps/web/Dockerfile's ARG block) — they MUST be passed here, not
+      # left to the Helm ConfigMap, or the deployed browser bundle silently
+      # ships with them undefined (auth would break). Sourced from repo
+      # Variables (Settings → Secrets and variables → Actions → Variables)
+      # since these are meant to be public in the browser bundle, not repo
+      # Secrets — with fallbacks matching infra/helm/values.yaml's defaults
+      # so a fresh repo without any configured vars still produces a
+      # deployable (if placeholder-hostnamed) image.
       - name: Build and push Web image
         uses: docker/build-push-action@v6
         with:
@@ -170,6 +179,13 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/pubflow/web:latest
             ghcr.io/${{ github.repository_owner }}/pubflow/web:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL || 'https://api.pubflow.io' }}
+            NEXT_PUBLIC_KEYCLOAK_URL=${{ vars.NEXT_PUBLIC_KEYCLOAK_URL || 'https://auth.pubflow.io' }}
+            NEXT_PUBLIC_KEYCLOAK_REALM=${{ vars.NEXT_PUBLIC_KEYCLOAK_REALM || 'pubflow' }}
+            NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=${{ vars.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web' }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -204,6 +220,14 @@ jobs:
         if: steps.check-kubeconfig.outputs.present == 'true'
         uses: azure/setup-kubectl@v4
 
+      # Non-secret infra facts (managed Postgres hostname, Spaces endpoint,
+      # ingress hostnames) live directly in infra/helm/values.yaml — edit
+      # and commit that file once you know your real values, same as any
+      # other config. Only actual credentials are injected here, from repo
+      # Secrets, and never committed. --set-string avoids Helm's type
+      # coercion on password-like strings; a literal comma inside a secret
+      # value would still break Helm's --set parsing (rare in practice for
+      # generated passwords/connection strings, but worth knowing).
       - name: Deploy via Helm
         if: steps.check-kubeconfig.outputs.present == 'true'
         env:
@@ -216,8 +240,27 @@ jobs:
             --create-namespace \
             --set global.imageTag=${{ github.sha }} \
             --set global.imageRegistry=ghcr.io/${{ github.repository_owner }}/pubflow \
+            --set-string secrets.databaseUrl="${{ secrets.PROD_DATABASE_URL }}" \
+            --set-string secrets.postgresPassword="${{ secrets.PROD_POSTGRES_PASSWORD }}" \
+            --set-string secrets.redisUrl="${{ secrets.PROD_REDIS_URL }}" \
+            --set-string secrets.minioAccessKey="${{ secrets.PROD_MINIO_ACCESS_KEY }}" \
+            --set-string secrets.minioSecretKey="${{ secrets.PROD_MINIO_SECRET_KEY }}" \
+            --set-string secrets.keycloakAdminPassword="${{ secrets.PROD_KEYCLOAK_ADMIN_PASSWORD }}" \
+            --set-string secrets.onlyofficeJwtSecret="${{ secrets.PROD_ONLYOFFICE_JWT_SECRET }}" \
+            --set-string secrets.anthropicApiKey="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --set-string secrets.stripeSecretKey="${{ secrets.STRIPE_SECRET_KEY }}" \
+            --set-string secrets.stripeWebhookSecret="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+            --set-string secrets.crossrefLoginId="${{ secrets.CROSSREF_LOGIN_ID }}" \
+            --set-string secrets.crossrefLoginPassword="${{ secrets.CROSSREF_LOGIN_PASSWORD }}" \
+            --set-string secrets.luluClientKey="${{ secrets.LULU_CLIENT_KEY }}" \
+            --set-string secrets.luluClientSecret="${{ secrets.LULU_CLIENT_SECRET }}" \
+            --set-string secrets.pmcFtpUsername="${{ secrets.PMC_FTP_USERNAME }}" \
+            --set-string secrets.pmcFtpPassword="${{ secrets.PMC_FTP_PASSWORD }}" \
+            --set-string secrets.sentryDsn="${{ secrets.SENTRY_DSN }}" \
             --wait \
             --timeout 5m
           kubectl rollout status deployment/pubflow-api   -n pubflow
           kubectl rollout status deployment/pubflow-web   -n pubflow
           kubectl rollout status deployment/pubflow-worker -n pubflow
+          kubectl rollout status deployment/pubflow-keycloak   -n pubflow
+          kubectl rollout status deployment/pubflow-onlyoffice -n pubflow

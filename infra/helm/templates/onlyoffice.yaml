@@ -1,0 +1,72 @@
+# Document editor for copyediting/proof review. Needs its own ingress host
+# (the browser loads the editor JS directly from it — see ONLYOFFICE_URL
+# usage in apps/api/src/plugins/onlyoffice-check.ts) and persistent storage
+# for WOPI signing keys/user data/logs (infra/docker/docker-compose.yml's
+# onlyoffice_data/onlyoffice_logs volumes, same reasoning here).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pubflow-onlyoffice-data
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.onlyoffice.dataStorage | default "5Gi" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-onlyoffice
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }  # ReadWriteOnce PVC — can't roll a second pod alongside the first
+  selector:
+    matchLabels:
+      app: pubflow-onlyoffice
+  template:
+    metadata:
+      labels:
+        app: pubflow-onlyoffice
+    spec:
+      containers:
+        - name: onlyoffice
+          image: onlyoffice/documentserver:latest
+          env:
+            - { name: JWT_ENABLED, value: "true" }
+            # Custom header, not the default "Authorization" — S3/Spaces
+            # presigned downloads fail otherwise (URL already carries
+            # query-string auth). Same reasoning as local docker-compose.
+            - { name: JWT_HEADER, value: "AuthorizationJwt" }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: pubflow-secrets, key: ONLYOFFICE_JWT_SECRET }
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - { name: data, mountPath: /var/www/onlyoffice/Data }
+            - { name: logs, mountPath: /var/log/onlyoffice }
+          readinessProbe:
+            httpGet: { path: /healthcheck, port: 80 }
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { cpu: 2000m, memory: 2Gi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: pubflow-onlyoffice-data }
+        - name: logs
+          emptyDir: {}  # logs don't need to survive a pod restart
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pubflow-onlyoffice
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector: { app: pubflow-onlyoffice }
+  ports:
+    - port: 80
+      targetPort: 80

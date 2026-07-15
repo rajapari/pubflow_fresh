@@ -1,3 +1,10 @@
+# NOTE on NEXT_PUBLIC_* keys below: they're included here because Next.js
+# server-side code (API routes, server components) reads them from
+# process.env at request time same as any other var — but the *browser*
+# bundle only ever sees whatever was baked in at `docker build` time via
+# apps/web/Dockerfile's ARGs (see .github/workflows/ci.yml's "Build and push
+# Web image" step). Changing a value here does NOT change what's already
+# compiled into a running web pod's client JS — that needs a rebuild.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,16 +15,39 @@ data:
   APP_URL: {{ .Values.config.appUrl | quote }}
   API_URL: {{ .Values.config.apiUrl | quote }}
   NEXT_PUBLIC_API_URL: {{ .Values.config.apiUrl | quote }}
+
   KEYCLOAK_URL: {{ .Values.config.keycloakUrl | quote }}
   KEYCLOAK_REALM: {{ .Values.config.keycloakRealm | quote }}
   KEYCLOAK_CLIENT_ID: {{ .Values.config.keycloakClientId | quote }}
+  KEYCLOAK_ADMIN_USER: {{ .Values.config.keycloakAdminUser | quote }}
+  NEXT_PUBLIC_KEYCLOAK_URL: {{ .Values.config.keycloakUrl | quote }}
+  NEXT_PUBLIC_KEYCLOAK_REALM: {{ .Values.config.keycloakRealm | quote }}
+  NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: {{ .Values.config.nextPublicKeycloakClientId | quote }}
+
   MINIO_ENDPOINT: {{ .Values.config.minioEndpoint | quote }}
-  MINIO_PORT: "9000"
-  MINIO_USE_SSL: "false"
+  MINIO_PORT: {{ .Values.config.minioPort | quote }}
+  MINIO_USE_SSL: {{ .Values.config.minioUseSSL | quote }}
   MINIO_BUCKET: {{ .Values.config.minioBucket | quote }}
-  REDIS_URL: {{ .Values.config.redisUrl | quote }}
+  # REDIS_URL is NOT here — it's a managed-Redis connection string with an
+  # embedded password, so it lives in the pubflow-secrets Secret only
+  # (templates/secret.yaml). Defining it in both places would leave the
+  # actual value depending on envFrom list order, which is fragile.
+
+  ONLYOFFICE_URL: {{ .Values.config.onlyofficeUrl | quote }}
+
   SMTP_HOST: {{ .Values.config.smtpHost | quote }}
   SMTP_PORT: {{ .Values.config.smtpPort | quote }}
   SMTP_FROM: {{ .Values.config.smtpFrom | quote }}
+
   CROSSREF_TEST_MODE: {{ .Values.config.crossrefTestMode | quote }}
+  CROSSREF_DEPOSITOR_EMAIL: {{ .Values.config.crossrefDepositorEmail | quote }}
+
+  LULU_POD_PACKAGE_ID: {{ .Values.config.luluPodPackageId | quote }}
+
+  PANDOC_SERVICE_URL: {{ .Values.config.pandocServiceUrl | quote }}
+  LATEX_SERVICE_URL: {{ .Values.config.latexServiceUrl | quote }}
+  SCRIBUS_SERVICE_URL: {{ .Values.config.scribusServiceUrl | quote }}
+  PREFLIGHT_SERVICE_URL: {{ .Values.config.preflightServiceUrl | quote }}
+  IMAGE_SERVICE_URL: {{ .Values.config.imageServiceUrl | quote }}
+  IDML_SERVICE_URL: {{ .Values.config.idmlServiceUrl | quote }}
   LANGUAGETOOL_URL: {{ .Values.config.languagetoolUrl | quote }}

@@ -1,0 +1,95 @@
+# Auth. Nothing in the app works without this — every request goes through
+# Keycloak token validation. Points at the same managed Postgres as the app
+# (separate schema, matching infra/docker/docker-compose.yml's local dev
+# pattern) rather than needing its own database.
+#
+# Runs `start` (production mode), not `start-dev` like local docker-compose
+# — start-dev disables HTTPS enforcement and uses in-memory-only caching,
+# neither acceptable outside a laptop. KC_PROXY=edge tells Keycloak it's
+# behind a TLS-terminating ingress so it generates https:// URLs correctly
+# instead of http://.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pubflow-keycloak-realm
+  namespace: {{ .Values.global.namespace }}
+data:
+  # Copied from services/keycloak/realm-export.json (Helm's .Files can only
+  # read inside the chart directory, not ../../services) — infra/helm/files/
+  # keycloak-realm-export.json is the copy actually used here. Keep both in
+  # sync if the realm changes; local docker-compose still reads the original.
+  realm-export.json: |
+{{ .Files.Get "files/keycloak-realm-export.json" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pubflow-keycloak
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pubflow-keycloak
+  template:
+    metadata:
+      labels:
+        app: pubflow-keycloak
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:24.0
+          args: ["start", "--import-realm"]
+          env:
+            - { name: KC_DB, value: "postgres" }
+            # Built from parts rather than stored as one opaque string — the
+            # same host/port/user/db also appear in DATABASE_URL (secret),
+            # so this is the single source of truth for them.
+            - { name: KC_DB_URL, value: "jdbc:postgresql://{{ .Values.config.postgresHost }}:{{ .Values.config.postgresPort }}/{{ .Values.config.postgresDatabase }}?sslmode=require" }
+            - { name: KC_DB_USERNAME, value: {{ .Values.config.postgresUser | quote }} }
+            # Same credential as DATABASE_URL's embedded password — two views
+            # of one secret, matching infra/docker/docker-compose.yml's
+            # local-dev convention (POSTGRES_PASSWORD must stay identical to
+            # what's embedded in DATABASE_URL).
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: pubflow-secrets, key: POSTGRES_PASSWORD }
+            - { name: KC_DB_SCHEMA, value: "keycloak" }
+            - { name: KC_HOSTNAME, value: {{ .Values.ingress.hosts.auth | quote }} }
+            - { name: KC_PROXY, value: "edge" }
+            - { name: KC_HTTP_ENABLED, value: "true" }
+            # Without this, /health/ready (used by the readinessProbe below)
+            # 404s forever and the rollout never completes — Keycloak's
+            # health endpoints are opt-in, not on by default.
+            - { name: KC_HEALTH_ENABLED, value: "true" }
+            - { name: KEYCLOAK_ADMIN, value: "admin" }
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: pubflow-secrets, key: KEYCLOAK_ADMIN_PASSWORD }
+          ports:
+            - containerPort: 8080
+            - containerPort: 9000  # management interface — /health/ready lives here
+          volumeMounts:
+            - name: realm-export
+              mountPath: /opt/keycloak/data/import
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 9000 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 300m, memory: 512Mi }
+            limits:   { cpu: 1000m, memory: 1Gi }
+      volumes:
+        - name: realm-export
+          configMap: { name: pubflow-keycloak-realm }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pubflow-keycloak
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector: { app: pubflow-keycloak }
+  ports:
+    - port: 80
+      targetPort: 8080

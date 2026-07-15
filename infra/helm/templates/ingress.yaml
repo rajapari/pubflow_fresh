@@ -17,6 +17,8 @@ spec:
     - hosts:
         - {{ .Values.ingress.hosts.web }}
         - {{ .Values.ingress.hosts.api }}
+        - {{ .Values.ingress.hosts.auth }}
+        - {{ .Values.ingress.hosts.docs }}
       secretName: pubflow-tls
   {{- end }}
   rules:
@@ -38,6 +40,26 @@ spec:
             backend:
               service:
                 name: pubflow-api
+                port:
+                  number: 80
+    - host: {{ .Values.ingress.hosts.auth }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pubflow-keycloak
+                port:
+                  number: 80
+    - host: {{ .Values.ingress.hosts.docs }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pubflow-onlyoffice
                 port:
                   number: 80
 {{- end }}

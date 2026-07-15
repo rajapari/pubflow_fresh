@@ -1,5 +1,10 @@
 global:
-  imageRegistry: ghcr.io/rajapari84/pubflow
+  # CI's deploy job overrides this at `helm upgrade` time via --set with the
+  # real ${{ github.repository_owner }} — this default only matters for a
+  # manual `helm upgrade` run without that flag, so keep it matching the
+  # actual repo owner (was "rajapari84", a stale value that never matched
+  # `git remote -v`'s "rajapari").
+  imageRegistry: ghcr.io/rajapari/pubflow
   imageTag: latest
   namespace: pubflow
 
@@ -26,6 +31,12 @@ worker:
     requests: { cpu: 200m, memory: 256Mi }
     limits:   { cpu: 2000m, memory: 2Gi }
 
+# Document editor (copyediting/proof review). See templates/onlyoffice.yaml
+# for why this needs its own PVC and can't use the managed-storage approach
+# the rest of the data layer uses.
+onlyoffice:
+  dataStorage: 5Gi
+
 ingress:
   enabled: true
   className: nginx
@@ -34,30 +45,106 @@ ingress:
   hosts:
     web: app.pubflow.io
     api: api.pubflow.io
+    auth: auth.pubflow.io   # Keycloak — templates/keycloak.yaml
+    docs: docs.pubflow.io   # OnlyOffice — templates/onlyoffice.yaml
 
 config:
   appUrl: "https://app.pubflow.io"
   apiUrl: "https://api.pubflow.io"
-  keycloakUrl: "https://auth.pubflow.io"
+
+  # ── Keycloak ───────────────────────────────────────────
+  keycloakUrl: "https://auth.pubflow.io"       # must match ingress.hosts.auth
   keycloakRealm: "pubflow"
-  keycloakClientId: "pubflow-api"
-  minioEndpoint: "minio.pubflow-infra.svc.cluster.local"
+  keycloakClientId: "pubflow-api"              # confidential client, apps/api
+  nextPublicKeycloakClientId: "pubflow-web"    # public client, browser-facing
+  keycloakAdminUser: "admin"
+
+  # ── Managed Postgres (DigitalOcean or equivalent) ─────────
+  # Discrete parts, not one opaque string — templates/keycloak.yaml builds
+  # its own JDBC URL from these, and they're the source of truth for the
+  # host/port/db/user portions embedded in secrets.databaseUrl too. Fill
+  # these in from your managed Postgres cluster's connection details.
+  postgresHost: "CHANGEME.db.ondigitalocean.com"
+  postgresPort: "25060"
+  postgresDatabase: "pubflow"
+  postgresUser: "pubflow"
+
+  # ── Object storage (DigitalOcean Spaces or any S3-compatible service) ───
+  # Spaces is genuinely S3-API-compatible, so apps/api/src/plugins/minio.ts
+  # and apps/worker/src/lib/storage.ts need zero code changes — only these
+  # values change from the local self-hosted-MinIO defaults.
+  minioEndpoint: "CHANGEME.digitaloceanspaces.com"  # e.g. nyc3.digitaloceanspaces.com
+  minioPort: "443"
+  minioUseSSL: "true"
   minioBucket: "pubflow-files"
-  redisUrl: "redis://redis.pubflow-infra.svc.cluster.local:6379/0"
+
+  # ── OnlyOffice ─────────────────────────────────────────
+  onlyofficeUrl: "https://docs.pubflow.io"       # must match ingress.hosts.docs
+  # ONLYOFFICE_CALLBACK_URL and ONLYOFFICE_MINIO_HOST are left unset here —
+  # apps/api's own fallbacks (API_URL, MINIO_ENDPOINT) are correct in
+  # production since both are already public/internet-reachable.
+
+  # ── Email ──────────────────────────────────────────────
   smtpHost: "smtp.pubflow.io"
   smtpPort: "587"
   smtpFrom: "noreply@pubflow.io"
-  crossrefTestMode: "false"
+  # NOTE: the notification worker (apps/worker/src/processors/notification.ts)
+  # currently has no SMTP_USER/SMTP_PASSWORD support at all — only host/port/
+  # from. Most production SMTP relays (SendGrid, Postmark, SES) require auth.
+  # This is a real gap, out of scope for the k8s build-out itself — flagged
+  # here so it isn't lost. Mailpit (local dev) doesn't need auth, which is
+  # presumably why this was never needed before now.
+
+  # ── Crossref DOI registration ──────────────────────────
+  # Defaults to test mode until you've verified real deposits work — flip to
+  # "false" deliberately, not as a shipped default, once confirmed.
+  crossrefTestMode: "true"
+  crossrefDepositorEmail: "noreply@pubflow.io"
+
+  # ── Print-on-demand ────────────────────────────────────
+  luluPodPackageId: "0600X0900BWSTDSS060UW444MXX"
+
+  # ── Bot-pipeline microservices (Phase 2 — not yet deployed) ──────────────
+  # In-cluster DNS names templates/microservices.yaml (Phase 2) will create.
+  # Referencing them now means Phase 2 only has to add the Deployments/
+  # Services, not revisit this file. Until then these simply won't resolve —
+  # same graceful-missing-service story LANGUAGETOOL_URL already has below.
+  pandocServiceUrl: "http://pandoc.pubflow.svc.cluster.local:4000"
+  latexServiceUrl: "http://latex.pubflow.svc.cluster.local:5001"
+  scribusServiceUrl: "http://scribus.pubflow.svc.cluster.local:5000"
+  preflightServiceUrl: "http://preflight.pubflow.svc.cluster.local:4200"
+  imageServiceUrl: "http://image.pubflow.svc.cluster.local:5002"
+  idmlServiceUrl: "http://idml.pubflow.svc.cluster.local:4100"
+
+  # ── Copyedit grammar bot (Phase 3 — not yet deployed) ────────────────────
+  # Degrades gracefully when unreachable (copyedit.ts already handles LT
+  # timeouts/errors) — lower priority than the pipeline services above.
   languagetoolUrl: "http://languagetool.pubflow.svc.cluster.local:8082"
 
-# Secrets must be provided via --set or external-secrets-operator
+# Every value here becomes a key in the pubflow-secrets K8s Secret
+# (templates/secret.yaml). Provide via `--set secrets.x=y` (CI does this
+# from GitHub Actions secrets) or `-f` with a separate, gitignored values
+# file — never commit real values here. The four required ones (no default,
+# `helm upgrade` fails loudly without them) are databaseUrl, postgresPassword,
+# redisUrl, minioAccessKey, minioSecretKey, keycloakAdminPassword,
+# onlyofficeJwtSecret. Everything else defaults to "" (optional integration,
+# same as local dev).
 secrets: {}
 # secrets:
-#   databaseUrl: "postgresql://..."
-#   minioAccessKey: ""
-#   minioSecretKey: ""
-#   keycloakClientSecret: ""
+#   databaseUrl: "postgresql://pubflow:PASSWORD@HOST:25060/pubflow?sslmode=require"
+#   postgresPassword: "PASSWORD"          # same password embedded above
+#   redisUrl: "rediss://default:PASSWORD@HOST:25061/0"
+#   minioAccessKey: ""                    # DO Spaces access key
+#   minioSecretKey: ""                    # DO Spaces secret key
 #   keycloakAdminPassword: ""
-#   onlyofficeJwtSecret: ""
+#   onlyofficeJwtSecret: ""                # must match nothing else — generate a random 32+ char string
+#   anthropicApiKey: ""
 #   stripeSecretKey: ""
 #   stripeWebhookSecret: ""
+#   crossrefLoginId: ""
+#   crossrefLoginPassword: ""
+#   luluClientKey: ""
+#   luluClientSecret: ""
+#   pmcFtpUsername: ""
+#   pmcFtpPassword: ""
+#   sentryDsn: ""

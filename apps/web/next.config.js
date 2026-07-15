@@ -2,6 +2,10 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@pubflow/types'],
+  // apps/web/Dockerfile's production CMD runs the standalone server output
+  // directly (apps/web/.next/standalone/server.js) — without this, that
+  // file never gets built and the container crashes on startup.
+  output: 'standalone',
 }
 
 // Only wrap with Sentry's build plugin when actually configured — keeps the
