@@ -180,6 +180,19 @@ services:
     networks: [app]
     restart: unless-stopped
 
+  # Artwork QA (Stage 7) — DPI/color-mode/ICC metadata, thumbnails, format
+  # conversion. Core for the same reason as the typesetting pipeline above:
+  # ARTWORK_PROCESSING is a mandatory stage in the submission workflow, not
+  # an opt-in feature. Flask+Pillow, no JVM — idle cost matches pandoc/etc.
+  image:
+    build:
+      context: ../../services/image
+    container_name: pubflow_image
+    ports:
+      - "5002:5002"
+    networks: [app]
+    restart: unless-stopped
+
   # ── TOOLS ──────────────────────────────────────────────
   onlyoffice:
     image: onlyoffice/documentserver:latest

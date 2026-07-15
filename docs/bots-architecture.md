@@ -1,6 +1,6 @@
 # PubFlow Stage-Bot Architecture
 
-**Status:** Living specification · Last updated 2026-07-09
+**Status:** Living specification · Last updated 2026-07-15
 **Scope:** Automated "bots" (queue workers + AI assistants) supporting every stage of the publishing pipeline, from submission intake to post-publication marketing.
 
 Legend used throughout:
@@ -212,7 +212,7 @@ Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, 
 
 | Bot | Status | Notes |
 |---|---|---|
-| **Image QA Bot** | ✅ | `processors/image.ts`: DPI ≥300, color mode, ICC, thumbnails, web optimization |
+| **Image QA Bot** | ✅ | `processors/image.ts` + `services/image` (Flask + Pillow, no ImageMagick/color-managed ICC transform — reports DPI/color-mode/embedded-ICC-name from the original, `VALIDATE_*` comparison against job targets happens worker-side). Tasks: `EXTRACT_METADATA`/`VALIDATE_DPI`/`VALIDATE_COLORMODE` (read-only), `GENERATE_THUMBNAIL` (max 400px, aspect preserved), `OPTIMIZE_WEB` (JPEG q82 if opaque, else PNG), `CONVERT_FORMAT` (fixed PNG default — job schema has no target-format field), `APPLY_ICC` (reports embedded profile only, not a real color-managed conversion — flagged in the response `errors[]` so this isn't mistaken for one). Auto-dispatched on `ARTWORK_PROCESSING` for every FIGURE/GRAPHICAL_ABSTRACT/COVER asset. |
 | **Alt-Text Generator** | 🔜 🤖 | Vision pass over approved figures → `Asset.altText` draft (accessibility + JATS `<alt-text>`); graphical abstract prioritized. |
 | **Vector Converter** | 🔜 | EPS/SVG → PDF/press-ready via penpot-exporter or Inkscape service. |
 | **Figure Permissions Checker** | 🔜 | Metadata/rules pass flagging third-party figures needing clearance. |
@@ -318,6 +318,10 @@ CorrectionApplyJob { type:'CORRECTION_APPLY', submissionId, requestedById }
 CompletenessJob    { type:'COMPLETENESS', submissionId }                       // intake queue
 RevisionDiffJob    { type:'REVISION_DIFF', submissionId, fromVersion?, toVersion? }
 PreflightJob       { type:'PREFLIGHT', submissionId, outputId, inputMinioKey }
+ImageJob           { type:'IMAGE', assetId, submissionId, inputMinioKey,
+                   tasks[VALIDATE_DPI|VALIDATE_COLORMODE|CONVERT_FORMAT|APPLY_ICC|
+                   GENERATE_THUMBNAIL|EXTRACT_METADATA|OPTIMIZE_WEB], targetDpi=300,
+                   targetColorMode? }
 ```
 
 Planned queues for 🔜 bots: `similarity`, `xmlvalidate`, `publish`, `marketing` — same recipe (schema + processor + Worker line).
@@ -332,14 +336,14 @@ Planned queues for 🔜 bots: `similarity`, `xmlvalidate`, `publish`, `marketing
 | LaTeX (`services/latex`) | 5001 | ✅ | latex processor. Accepts `source` **or** legacy `latex` key, optional `resources{filename:base64}` (ported `.cls`, `.bib`, logos — basename-sanitized), returns `{pdf, logs, errors[], metadata}`. In docker-compose as `pubflow_latex` (core, 2026-07-09); large image (`texlive-lang-all`) |
 | Scribus headless (`services/scribus`) | 5000 | ✅ | scribus processor (`.sla` + content JSON → PDF). In docker-compose as `pubflow_scribus` (core, 2026-07-09) |
 | **Preflight** (`services/preflight`) | 4200 | ✅ | preflight processor. Flask + pikepdf, gunicorn; in docker-compose as `pubflow_preflight` (core) |
+| **Image QA** (`services/image`) | 5002 | ✅ | image processor. Flask + Pillow, gunicorn; in docker-compose as `pubflow_image` (core, 2026-07-15). No ImageMagick/color-managed ICC transform — see Stage 7 for the exact scope line. |
 | **IDML extractor** (`services/idml`) | 4100 | ✅ | template processor. Flask+lxml, gunicorn; in docker-compose as `pubflow_idml` (`--profile tools`) |
 | LanguageTool | 8082 | ✅ | grammar router, copyedit bot |
 | MinIO | 9000 | ✅ | all file storage |
 | Anthropic API | — | ✅ | `lib/ai.ts` (all 🤖 bots) |
-| **Image processing** | 5002 | ⚠️ **gap** | `processors/image.ts` calls `IMAGE_SERVICE_URL` (default `localhost:5002`) for artwork QA (DPI/color-mode/ICC/thumbnails), but no `services/image` directory or docker-compose entry exists — unlike pandoc/latex/scribus, this one was never built at all, not just unwired. Every `ARTWORK_PROCESSING` image job will fail until this service is built. |
 | GROBID, epubcheck | — | 🔜 | metadata extraction, XML validation |
 
-Worker env vars: `REDIS_URL`, `DATABASE_URL`, `MINIO_*`, `PANDOC_SERVICE_URL`, `LATEX_SERVICE_URL`, `SCRIBUS_SERVICE_URL`, `PREFLIGHT_SERVICE_URL`, `IDML_SERVICE_URL`, `LANGUAGETOOL_URL`, `ANTHROPIC_*` (§2.2). `IMAGE_SERVICE_URL` is read but has no backing service yet (see gap above).
+Worker env vars: `REDIS_URL`, `DATABASE_URL`, `MINIO_*`, `PANDOC_SERVICE_URL`, `LATEX_SERVICE_URL`, `SCRIBUS_SERVICE_URL`, `PREFLIGHT_SERVICE_URL`, `IMAGE_SERVICE_URL`, `IDML_SERVICE_URL`, `LANGUAGETOOL_URL`, `ANTHROPIC_*` (§2.2).
 
 ---
 
@@ -403,12 +407,15 @@ Suites live beside the code they verify; all run against the real local stack
 | IDML service | `services/idml/test_server.py` | 6 | Synthetic-IDML extraction, defaults, corrupt/wrong-type rejection |
 | LaTeX service | `services/latex/test_server.py` | 5 | source/latex key contract, resource placement + traversal guard, response shape, pass clamping |
 | Preflight service | `services/preflight/test_server.py` | 15 | Fonts (Base-14 exempt, subset-tag stripping, Type0 descendants), trim/bleed sanity, PDF/X intent, encrypted print-permission, corrupt-PDF fast fail, multi-page worst-case, Flask route contract |
+| Image | `apps/worker/test/image.test.ts` | 4 | DB + live image service: full task set on a DPI-less image → NEEDS_REVISION with all Asset fields populated, metadata-only tasks approve regardless of actual DPI, color-mode mismatch flagged against a target, corrupt image rejected not silently accepted |
+| Image service | `services/image/test_server.py` | 22 | DPI/dimension/color-mode extraction (RGB/CMYK/grayscale), real-ICC-profile name extraction vs. absent-profile, thumbnail aspect preservation, CMYK→PNG fallback (PNG can't encode CMYK directly), OPTIMIZE_WEB format selection (JPEG opaque / PNG alpha), CONVERT_FORMAT default, corrupt-image rejection, Flask route contract |
 
 Run: `pnpm --filter @pubflow/worker test`, `pnpm --filter @pubflow/api test`,
 `python -m pytest services/idml/test_server.py -q`,
 `python -m pytest services/latex/test_server.py -q`,
-`python -m pytest services/preflight/test_server.py -q`
-(idml/latex/preflight run as separate invocations — `services/idml/test_server.py`
+`python -m pytest services/preflight/test_server.py -q`,
+`python -m pytest services/image/test_server.py -q`
+(idml/latex/preflight/image run as separate invocations — `services/idml/test_server.py`
 and `services/latex/test_server.py` share a basename and collide if pytest
 collects them together). CI now runs the full worker/api/python suite on every
 push (`.github/workflows/ci.yml` `test` job, added 2026-07-09) against live
