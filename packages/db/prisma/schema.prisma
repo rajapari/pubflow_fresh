@@ -396,6 +396,13 @@ model Submission {
   // Peer-review revision rounds completed (each MINOR/MAJOR_REVISION decision
   // increments). Hard cap 3: afterwards the editor must accept or reject.
   revisionRound Int              @default(0)
+
+  // Phase C editorial-intelligence bot reports (preflightReport shape:
+  // { status, ..., ranAt }). NULL until the bot runs; advisory only —
+  // editors decide, bots prepare.
+  screeningReport  Json?
+  rebuttalReport   Json?
+  similarityReport Json?
   doi           String?
   submittedAt   DateTime?
   createdAt     DateTime         @default(now())

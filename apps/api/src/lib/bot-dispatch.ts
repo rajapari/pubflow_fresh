@@ -57,6 +57,11 @@ export async function dispatchStageBots(
           submissionId,
         })
 
+        // Phase C: AI desk-triage + similarity check (both degrade to a
+        // 'skipped' report when no AI key / provider is configured).
+        await queues[QUEUES.EDITORIAL].add('screening', { type: 'SCREENING', submissionId })
+        await queues[QUEUES.EDITORIAL].add('similarity', { type: 'SIMILARITY', submissionId })
+
         const assets = await prisma.asset.findMany({
           where: { submissionId },
           select: {
@@ -88,6 +93,9 @@ export async function dispatchStageBots(
           type: 'REVISION_DIFF',
           submissionId,
         })
+        // Phase C: verify every reviewer point was addressed (uses the diff
+        // the revision bot just produced, so it runs on the same transition).
+        await queues[QUEUES.EDITORIAL].add('rebuttal', { type: 'REBUTTAL', submissionId })
         break
       }
 

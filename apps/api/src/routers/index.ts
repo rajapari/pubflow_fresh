@@ -15,6 +15,7 @@ import { grammarRouter }     from './grammar.js'
 import { portalRouter }      from './portal.js'
 import { styleProfileRouter } from './styleProfile.js'
 import { layoutTemplateRouter } from './layoutTemplate.js'
+import { editorialRouter } from './editorial.js'
 
 export const appRouter = router({
   analytics:   analyticsRouter,
@@ -33,6 +34,7 @@ export const appRouter = router({
   portal:       portalRouter,
   styleProfile: styleProfileRouter,
   layoutTemplate: layoutTemplateRouter,
+  editorial: editorialRouter,
 })
 
 export type AppRouter = typeof appRouter

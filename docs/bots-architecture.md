@@ -154,8 +154,8 @@ Asset linkage rule ✅: intake writes `metadata.linkedToDeliverable = true` on S
 | **Manuscript Normalizer** | ✅ | `submission.ts` fires `PANDOC:normalize-manuscript` on upload |
 | **File Classifier / Separator** | ✅ 🤖 | `processors/intake.ts`. Deterministic filename/MIME heuristics classify every file (manuscript / FIGURE / TABLE / SUPPLEMENTARY / GRAPHICAL_ABSTRACT / COVER) with confidence + reason. If no filename identifies a graphical abstract, AI vision reviews up to 6 figure candidates (≤5 MB each) and nominates one or none. Exactly one GA enforced (highest confidence wins; others demoted). Re-classifies existing `Asset` rows via `assetId` or creates new ones. Triggers: auto on `SUBMITTED` (orchestrator) or manual `asset.classifyIntake` mutation. |
 | **Format & Completeness Checker** | ✅ | `processors/completeness.ts` (`COMPLETENESS` job on the `intake` queue, auto on SUBMITTED). Deterministic checks: title/abstract/keywords/co-author emails, manuscript present, DOCX package integrity, body word count, references-section heading, figure mentions in text vs uploaded figure assets. Each check is pass/warn/fail; the structured report lands in a SYSTEM `WorkflowLog` (`metadata.checks`), and the author gets a `COMPLETENESS_REPORT` email **only when something failed**. No AI, works on every deployment. |
-| **Plagiarism / Similarity Bot** | 🔜 | Crossref Similarity Check (iThenticate) or Copyleaks REST API; store score + report URL on submission; flag > threshold to editor. |
-| **AI Screening / Desk-Reject Triage** | 🔜 🤖 | Scope-fit vs publication description, quality red flags, paper-mill signals → structured recommendation for the desk editor (never auto-rejects). |
+| **Plagiarism / Similarity Bot** | ✅(adapter) | SIMILARITY job (auto on SUBMITTED) with a provider seam (`COPYLEAKS_API_KEY`); records exactly why it did not run when unconfigured → `Submission.similarityReport`. Live provider integration lands with real credentials. |
+| **AI Screening / Desk-Reject Triage** | ✅ 🤖 | `editorialProcessor` SCREENING job (auto on SUBMITTED): scope-fit vs publication aims, quality/integrity flags → `Submission.screeningReport`; advisory recommendation only, 'skipped' without an AI key. |
 | **Metadata Extraction Bot** | 🔜 🤖 | GROBID service + AI cleanup → title/authors/affiliations/ORCID/funding pre-fill. |
 | **Reference Validator** | 🔜 | Extend `lib/crossref.ts`: resolve each reference to a DOI, flag unresolvable + retracted (Retraction Watch data). |
 
@@ -164,7 +164,7 @@ Asset linkage rule ✅: intake writes `metadata.linkedToDeliverable = true` on S
 | Bot | Status | Notes |
 |---|---|---|
 | **Review Reminder Bot** | ✅ | `processors/scheduler.ts`, daily 08:00 UTC cron; reminds ≤3 days before due, marks OVERDUE, ≥6-day re-remind gap |
-| **Reviewer Matcher** | 🔜 🤖 | Rank tenant reviewers by keyword/abstract affinity; hard COI filters (co-authorship history, same affiliation) applied deterministically *before* AI ranking. |
+| **Reviewer Matcher** | ✅ 🤖 | `editorial.suggestReviewers`: hard deterministic COI exclusions (author/co-author/same-affiliation/already-assigned, never AI-overridable) → deterministic ranking (keyword overlap with review history, then lighter load, then experience) → optional AI re-rank with per-candidate rationale. |
 | **Review Quality Bot** | 🔜 🤖 | Score submitted reviews for completeness/constructiveness/tone before editor sees them. |
 | **Anonymizer Bot** | 🔜 | Strip author metadata + title-page identifiers from DOCX/PDF for double-blind review. |
 
@@ -181,14 +181,14 @@ workflow-log entry.
 | Bot | Status | Notes |
 |---|---|---|
 | **Revision Diff Bot** | ✅ | `processors/revision.ts` on the `revision` queue, auto on → REVISED. Extracts paragraphs from both DOCX versions (shared `lib/docx.ts`), computes an exact paragraph-level LCS diff (adjacent remove+add pairs merged into "modified"; graceful word-count-only fallback above ~4M cell pairs), uploads the full JSON report to MinIO (`revision-diffs/{submissionId}/v{a}-v{b}.json`) and writes a SYSTEM `WorkflowLog` summary: `+X/−Y words, A added / R removed / M modified paragraph(s)`. Non-DOCX version pairs are skipped with a log. |
-| **Rebuttal Coverage Checker** | 🔜 🤖 | Map each reviewer point to revision changes; list unaddressed points. |
+| **Rebuttal Coverage Checker** | ✅ 🤖 | REBUTTAL job (auto on REVISED, after the revision-diff bot): maps each reviewer point to the paragraph diff, judges yes/partly/no with evidence → `Submission.rebuttalReport`. |
 
 ### Stage 4 — Approval / Editorial Decision
 
 | Bot | Status | Notes |
 |---|---|---|
 | **Workflow-Transition Enforcement** | ✅ | `VALID_TRANSITIONS` enforced in every mutation; `advanceStatus` is the generic editor-driven transition |
-| **Decision Letter Generator** | 🔜 🤖 | Draft accept/revise/reject letters synthesizing review comments; editor edits before sending. |
+| **Decision Letter Generator** | ✅ 🤖 | `editorial.draftDecisionLetter`: AI synthesis of the round's reviews into a numbered decision letter, deterministic sendable template as fallback; drafts only, never sends. |
 
 ### Stage 5 — Copyediting
 

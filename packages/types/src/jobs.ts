@@ -201,6 +201,25 @@ export const IssueAssemblyJobSchema = z.object({
 })
 export type IssueAssemblyJob = z.infer<typeof IssueAssemblyJobSchema>
 
+// ── Editorial intelligence (Phase C) ─────────────────────
+// One queue, three job kinds, routed on data.type (intake-queue precedent).
+export const ScreeningJobSchema = z.object({
+  type: z.literal('SCREENING'),
+  submissionId: z.string().uuid(),
+})
+export const RebuttalJobSchema = z.object({
+  type: z.literal('REBUTTAL'),
+  submissionId: z.string().uuid(),
+})
+export const SimilarityJobSchema = z.object({
+  type: z.literal('SIMILARITY'),
+  submissionId: z.string().uuid(),
+})
+export const EditorialJobSchema = z.discriminatedUnion('type', [
+  ScreeningJobSchema, RebuttalJobSchema, SimilarityJobSchema,
+])
+export type EditorialJob = z.infer<typeof EditorialJobSchema>
+
 export const QUEUES = {
   PANDOC: 'pandoc',
   LATEX: 'latex',
@@ -216,5 +235,6 @@ export const QUEUES = {
   PREFLIGHT: 'preflight',
   XMLVALIDATE: 'xmlvalidate',
   ISSUE: 'issue',
+  EDITORIAL: 'editorial',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]
