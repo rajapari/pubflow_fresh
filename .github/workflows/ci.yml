@@ -151,8 +151,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Booting the buildx builder pulls moby/buildkit from Docker Hub
+      # anonymously, which sporadically times out on shared runners
+      # ("context deadline exceeded" from auth.docker.io). Attempt normally,
+      # then retry via Google's Docker Hub mirror, which serves the same
+      # image without touching Docker Hub auth.
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Set up Docker Buildx (retry via mirror)
+        if: steps.buildx.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
       # context is each service's own directory (their Dockerfiles COPY
       # server.py . expecting that as the build root, same as docker-compose.yml's
@@ -195,8 +208,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Same Docker Hub bootstrap flakiness mitigation as build-microservices.
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Set up Docker Buildx (retry via mirror)
+        if: steps.buildx.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
       - name: Build and push API image
         uses: docker/build-push-action@v6
