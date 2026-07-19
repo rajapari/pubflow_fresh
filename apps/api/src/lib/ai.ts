@@ -30,7 +30,9 @@ export async function aiText(
       body: JSON.stringify({
         model: MODEL,
         max_tokens: opts.maxTokens ?? 2048,
-        temperature: 0,
+        // No sampling params (rejected with 400 on claude-sonnet-5+); thinking
+        // disabled so small max_tokens budgets aren't spent on reasoning.
+        thinking: { type: 'disabled' },
         ...(opts.system ? { system: opts.system } : {}),
         messages: [{ role: 'user', content: prompt }],
       }),

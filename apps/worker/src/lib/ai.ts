@@ -22,7 +22,6 @@ export interface AiImage {
 export interface AiOptions {
   system?: string
   maxTokens?: number
-  temperature?: number
   model?: string
   /** Images to attach for vision tasks (graphical-abstract detection, alt-text). */
   images?: AiImage[]
@@ -60,7 +59,12 @@ async function callMessages(prompt: string, opts: AiOptions = {}): Promise<strin
   const body = {
     model:       opts.model ?? MODEL,
     max_tokens:  opts.maxTokens ?? 1024,
-    temperature: opts.temperature ?? 0,
+    // No sampling params: current models (claude-sonnet-5+) reject
+    // non-default temperature/top_p with a 400. Thinking is explicitly
+    // disabled — these are small deterministic structured calls, and the
+    // model's default adaptive thinking would silently spend part of each
+    // call's tight max_tokens budget on reasoning, truncating the JSON.
+    thinking: { type: 'disabled' },
     ...(opts.system ? { system: opts.system } : {}),
     messages: [{ role: 'user', content }],
   }
