@@ -177,6 +177,30 @@ export function normalizeTemplateClassName(name: string): string {
   return name.replace(/[^a-zA-Z]/g, '').toLowerCase() || 'pubflowtemplate'
 }
 
+// ── XML/EPUB validation (Stage 11) ───────────────────────
+// Validates generated JATS XML / EPUB outputs before they may be published.
+export const XmlValidateJobSchema = z.object({
+  type: z.literal('XMLVALIDATE'),
+  submissionId: z.string().uuid(),
+  outputId: z.string().uuid(),
+  // Which validator to run — matches the Output.format that produced the file.
+  kind: z.enum(['jats', 'epub']),
+  inputMinioKey: z.string(),
+})
+export type XmlValidateJob = z.infer<typeof XmlValidateJobSchema>
+
+// ── Issue assembly (Stage 12) ────────────────────────────
+// Compiles an issue-level PDF: generated ToC followed by every article's
+// latest completed PDF in reading order.
+export const IssueAssemblyJobSchema = z.object({
+  type: z.literal('ISSUE_ASSEMBLY'),
+  issueId: z.string().uuid(),
+  // Which article PDF flavor to bind. PDF_WEB reads better on screen;
+  // PDF_PRINT is for a printable issue file.
+  pdfFormat: z.enum(['PDF_WEB', 'PDF_PRINT']).default('PDF_WEB'),
+})
+export type IssueAssemblyJob = z.infer<typeof IssueAssemblyJobSchema>
+
 export const QUEUES = {
   PANDOC: 'pandoc',
   LATEX: 'latex',
@@ -190,5 +214,7 @@ export const QUEUES = {
   CORRECTION: 'correction',
   REVISION: 'revision',
   PREFLIGHT: 'preflight',
+  XMLVALIDATE: 'xmlvalidate',
+  ISSUE: 'issue',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

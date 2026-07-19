@@ -248,14 +248,14 @@ Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, 
 | Bot | Status | Notes |
 |---|---|---|
 | **JATS / EPUB / HTML generation** | ✅ | Pandoc processor (`jats`, `epub3`, `html5` targets) |
-| **XML/EPUB Validator Bot** | 🔜 | New service (jing + JATS DTD, epubcheck); validation must pass before PUBLISHED. |
+| **XML/EPUB Validator Bot** | ✅ | `services/xmlvalidate` (:4300): JATS structural checks via lxml (front matter, title, contributors, graphic hrefs), EPUB via bundled epubcheck (degrades to warn without Java). `xmlvalidateProcessor` writes `Output.validationReport` (preflightReport shape); auto-chained by the pandoc processor after JATS/EPUB generation. |
 
 ### Stage 12 — Issue Compiling
 
 | Bot | Status | Notes |
 |---|---|---|
 | **Issue router** | ✅ | Assign articles to issues, publish notifications |
-| **Issue Assembler Bot** | 🔜 | Order articles, generate ToC (graphical abstracts as thumbnails), front matter, continuous pagination, issue-level PDF via LaTeX/Scribus. |
+| **Issue Assembler Bot** | ✅ | `issueProcessor`: reading order via `Submission.issueOrder` (NULLs last, title tiebreak), ToC typeset by the LaTeX service with correct start pages, concatenation via the preflight service's new `/merge` (pikepdf). Result on `Issue.compiledPdfKey`; articles lacking the requested PDF flavor are skipped and reported in `compileError`. API: `issue.setArticleOrder` / `issue.assemble` / `issue.getCompiledPdf`. |
 
 ### Stage 13 — Upload & Publish
 
@@ -367,7 +367,7 @@ All new endpoints are tenant-scoped and role-checked (author vs production staff
 | Phase | Contents | Status |
 |---|---|---|
 | **A — Foundations + 4 flagship bots** | Queues, schema, AI client, intake classifier, style-manual engine, template porting, proof workbench, orchestrator | ✅ **Done (2026-07-05)** |
-| **B — Close the production loop** | ✅ Correction Applier (Stage 10) · ✅ revision-round governance (max 3, per-round version snapshots) · ✅ stage-transition dispatch for COPY_EDITING/ARTWORK/TYPESETTING/PROOF_REVIEW · ✅ production-role seed users · ✅ Preflight Bot + PROOF_REVIEW gate (2026-07-09) · 🔜 XML/EPUB Validator, Issue Assembler | ⏳ **In progress (2026-07-09)** |
+| **B — Close the production loop** | ✅ Correction Applier (Stage 10) · ✅ revision-round governance (max 3, per-round version snapshots) · ✅ stage-transition dispatch for COPY_EDITING/ARTWORK/TYPESETTING/PROOF_REVIEW · ✅ production-role seed users · ✅ Preflight Bot + PROOF_REVIEW gate (2026-07-09) · ✅ XML/EPUB Validator + PUBLISH gate wiring pending · ✅ Issue Assembler (2026-07-19) | ✅ **Done (2026-07-19)** |
 | **C — Editorial intelligence** | ✅ Format & Completeness Checker · ✅ Revision Diff Bot · 🔜 similarity check, reviewer matcher, AI screening, rebuttal coverage, decision letters | ⏳ started (2026-07-06) |
 | **D — Reach & compliance** | Alt-text, marketing/social/newsletter, SEO meta, DOAJ/archival, APC/dunning, ethics/data-availability/integrity, accessibility | 🔜 |
 

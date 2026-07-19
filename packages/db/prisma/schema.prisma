@@ -367,6 +367,12 @@ model Issue {
   publishedAt   DateTime?
   createdAt     DateTime  @default(now())
 
+  // Issue Assembler Bot: the compiled issue-level PDF (ToC + articles in
+  // reading order). NULL until assembly runs; re-assembly overwrites.
+  compiledPdfKey String?
+  compiledAt     DateTime?
+  compileError   String?
+
   publication Publication  @relation(fields: [publicationId], references: [id], onDelete: Cascade)
   submissions Submission[]
 
@@ -378,6 +384,9 @@ model Submission {
   tenantId      String
   publicationId String
   issueId       String?
+  // Reading order inside the assigned issue (1-based); NULL = unordered,
+  // sorted after ordered articles by title. Set via issue.setArticleOrder.
+  issueOrder    Int?
   authorId      String
   title         String
   abstract      String?
@@ -679,6 +688,12 @@ model Output {
   // error?: string, ranAt: ISO string } — one field, matching the
   // CopyEdit.botReport / LayoutTemplate.spec precedent elsewhere in this schema.
   preflightReport Json?
+
+  // XML/EPUB Validator Bot (JATS structure, EPUB via epubcheck). NULL until
+  // the bot runs; only JATS_XML/EPUB outputs get one. Shape mirrors
+  // preflightReport: { status: 'pending'|'error'|'pass'|'warn'|'fail',
+  // checks: [...], error?: string, ranAt: ISO string }.
+  validationReport Json?
 
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
 

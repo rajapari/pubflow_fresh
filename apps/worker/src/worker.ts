@@ -13,6 +13,8 @@ import { templateProcessor }     from './processors/template.js'
 import { correctionProcessor }   from './processors/correction.js'
 import { revisionProcessor }     from './processors/revision.js'
 import { preflightProcessor }    from './processors/preflight.js'
+import { xmlvalidateProcessor }  from './processors/xmlvalidate.js'
+import { issueProcessor }        from './processors/issue.js'
 import { ensureBucket }          from './lib/storage.js'
 
 function parseRedisUrl(url: string) {
@@ -69,6 +71,8 @@ const workers = [
   new Worker(QUEUES.CORRECTION,   correctionProcessor,   { ...workerOpts, concurrency: 2 }),
   new Worker(QUEUES.REVISION,     revisionProcessor,     { ...workerOpts, concurrency: 2 }),
   new Worker(QUEUES.PREFLIGHT,    preflightProcessor,    { ...workerOpts, concurrency: 3 }),
+  new Worker(QUEUES.XMLVALIDATE,  xmlvalidateProcessor,  { ...workerOpts, concurrency: 3 }),
+  new Worker(QUEUES.ISSUE,        issueProcessor,        { ...workerOpts, concurrency: 1 }),
 ]
 
 // Register the daily review-reminder cron job.

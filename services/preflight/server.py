@@ -185,5 +185,38 @@ def preflight():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/merge', methods=['POST'])
+def merge():
+    """Concatenate PDFs in order (Issue Assembler: ToC + articles → one file).
+
+    Body: {"pdfs": [<base64>, ...]} → {"pdf": <base64>, "pageCount": n}
+    """
+    data = request.get_json(silent=True) or {}
+    pdfs_b64 = data.get('pdfs')
+    if not pdfs_b64 or not isinstance(pdfs_b64, list):
+        return jsonify({'error': 'Missing "pdfs" (list of base64 PDFs) in request body'}), 400
+
+    try:
+        merged = pikepdf.Pdf.new()
+        for i, b64 in enumerate(pdfs_b64):
+            try:
+                part = pikepdf.open(io.BytesIO(base64.b64decode(b64)))
+            except Exception as e:
+                return jsonify({'error': f'PDF #{i + 1} is unreadable: {e}'}), 400
+            merged.pages.extend(part.pages)
+
+        if len(merged.pages) == 0:
+            return jsonify({'error': 'Merged document has no pages'}), 400
+
+        out = io.BytesIO()
+        merged.save(out)
+        return jsonify({
+            'pdf': base64.b64encode(out.getvalue()).decode(),
+            'pageCount': len(merged.pages),
+        })
+    except Exception as e:  # noqa: BLE001 — surface everything to the worker
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=4200)

@@ -67,10 +67,10 @@ jobs:
       # idml and image are needed too: apps/worker/test/template.test.ts and
       # apps/worker/test/image.test.ts hit the real extractor/QA services,
       # not mocks.
-      - name: Start data services (postgres, redis, minio, languagetool, idml, image)
+      - name: Start data services (postgres, redis, minio, languagetool, idml, image, preflight, xmlvalidate)
         run: |
           docker compose --env-file .env -f infra/docker/docker-compose.yml \
-            --profile tools up -d postgres redis minio languagetool idml image
+            --profile tools up -d postgres redis minio languagetool idml image preflight xmlvalidate
           docker compose --env-file .env -f infra/docker/docker-compose.yml \
             up -d --wait postgres redis minio
 
@@ -101,6 +101,17 @@ jobs:
           done
           echo "Image QA service never became healthy" && exit 1
 
+      - name: Wait for preflight + xmlvalidate services
+        run: |
+          for port in 4200 4300; do
+            ok=0
+            for i in $(seq 1 30); do
+              curl -sf "http://127.0.0.1:$port/health" && ok=1 && break
+              sleep 2
+            done
+            [ "$ok" = "1" ] || { echo "Service on :$port never became healthy"; exit 1; }
+          done
+
       - run: pnpm --filter @pubflow/db db:migrate
 
       # Must run before `pnpm test`: apps/worker/test/template.test.ts shells
@@ -121,6 +132,7 @@ jobs:
           python -m pytest services/latex/test_server.py -q
           python -m pytest services/preflight/test_server.py -q
           python -m pytest services/image/test_server.py -q
+          python -m pytest services/xmlvalidate/test_server.py -q
 
   build-microservices:
     name: Build & Push Bot-Pipeline Images
@@ -141,6 +153,7 @@ jobs:
           - { name: preflight, dockerfile: services/preflight/Dockerfile }
           - { name: image,     dockerfile: services/image/Dockerfile }
           - { name: idml,      dockerfile: services/idml/Dockerfile }
+          - { name: xmlvalidate, dockerfile: services/xmlvalidate/Dockerfile }
     steps:
       - uses: actions/checkout@v4
 

@@ -222,3 +222,31 @@ def test_preflight_route_corrupt_pdf_still_returns_200_with_fail_report(client):
     res = client.post('/preflight', json={'pdf': base64.b64encode(b'garbage').decode()})
     assert res.status_code == 200
     assert res.get_json()['report']['status'] == 'fail'
+
+
+# ── /merge (Issue Assembler) ──────────────────────────────────────────────────
+
+def test_merge_concatenates_in_order(client):
+    a = build_pdf(pages=2)
+    b = build_pdf(pages=3)
+    res = client.post('/merge', json={
+        'pdfs': [base64.b64encode(a).decode(), base64.b64encode(b).decode()],
+    })
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body['pageCount'] == 5
+    merged = pikepdf.open(io.BytesIO(base64.b64decode(body['pdf'])))
+    assert len(merged.pages) == 5
+
+
+def test_merge_rejects_unreadable_part_with_index(client):
+    good = base64.b64encode(build_pdf()).decode()
+    bad = base64.b64encode(b'not a pdf').decode()
+    res = client.post('/merge', json={'pdfs': [good, bad]})
+    assert res.status_code == 400
+    assert 'PDF #2' in res.get_json()['error']
+
+
+def test_merge_requires_pdfs_list(client):
+    assert client.post('/merge', json={}).status_code == 400
+    assert client.post('/merge', json={'pdfs': 'not-a-list'}).status_code == 400

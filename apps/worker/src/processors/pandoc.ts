@@ -1,9 +1,15 @@
 // ── Pandoc processor ─────────────────────────────────────
 import type { Job } from 'bullmq'
+import { Queue } from 'bullmq'
 import type { Prisma } from '@pubflow/db'
-import { PandocJobSchema } from '@pubflow/types'
+import { PandocJobSchema, QUEUES } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
 import { downloadFromMinio, uploadToMinio } from '../lib/storage.js'
+import { getConnection } from '../lib/redis-connection.js'
+
+// JATS/EPUB outputs are validated before they may be published (Stage 11),
+// same chaining pattern latex/scribus use for preflight.
+const xmlvalidateQueue = new Queue(QUEUES.XMLVALIDATE, { connection: getConnection() })
 
 export async function pandocProcessor(job: Job) {
   const d = PandocJobSchema.parse(job.data)
@@ -54,6 +60,17 @@ export async function pandocProcessor(job: Job) {
         errorMessage: hasErrors ? (result.errors ?? []).join('\n') : null,
       },
     })
+
+    // Chain Stage-11 validation for publication formats.
+    if (!hasErrors && (d.outputFormat === 'jats' || d.outputFormat === 'epub')) {
+      await xmlvalidateQueue.add('validate-output', {
+        type: 'XMLVALIDATE',
+        submissionId: d.submissionId,
+        outputId: d.outputId,
+        kind: d.outputFormat,
+        inputMinioKey: outputKey,
+      })
+    }
 
     // Log workflow state change
     await prisma.workflowLog.create({

@@ -7,6 +7,75 @@ import { depositToPubMed } from '../lib/pubmed.js'
 import { submitToLulu } from '../lib/printod.js'
 
 export const issueRouter = router({
+  // ── Issue Assembler (Stage 12) ─────────────────────────
+
+  // Set the reading order of articles inside an issue. Pass the full ordered
+  // list of submission ids; each gets issueOrder = its position (1-based).
+  setArticleOrder: editorProcedure
+    .input(z.object({
+      issueId: z.string().uuid(),
+      submissionIds: z.array(z.string().uuid()).min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const issue = await prisma.issue.findFirst({
+        where: { id: input.issueId, publication: { tenantId: user.tenantId } },
+        include: { submissions: { select: { id: true } } },
+      })
+      if (!issue) throw new TRPCError({ code: 'NOT_FOUND' })
+
+      const inIssue = new Set(issue.submissions.map((s) => s.id))
+      const unknown = input.submissionIds.filter((id) => !inIssue.has(id))
+      if (unknown.length)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Submissions not in this issue: ${unknown.join(', ')}` })
+
+      await prisma.$transaction(
+        input.submissionIds.map((id, i) =>
+          prisma.submission.update({ where: { id }, data: { issueOrder: i + 1 } }),
+        ),
+      )
+      return { ordered: input.submissionIds.length }
+    }),
+
+  // Queue the Issue Assembler bot: ToC + article PDFs → one issue PDF.
+  assemble: editorProcedure
+    .input(z.object({
+      issueId: z.string().uuid(),
+      pdfFormat: z.enum(['PDF_WEB', 'PDF_PRINT']).default('PDF_WEB'),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma, queues } = ctx
+      const issue = await prisma.issue.findFirst({
+        where: { id: input.issueId, publication: { tenantId: user.tenantId } },
+        include: { submissions: { select: { id: true } } },
+      })
+      if (!issue) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (issue.submissions.length === 0)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Issue has no assigned articles' })
+
+      await queues[QUEUES.ISSUE].add('assemble-issue', {
+        type: 'ISSUE_ASSEMBLY',
+        issueId: input.issueId,
+        pdfFormat: input.pdfFormat,
+      })
+      return { queued: true, articles: issue.submissions.length }
+    }),
+
+  // Presigned link to the compiled issue PDF (null-safe status included).
+  getCompiledPdf: protectedProcedure
+    .input(z.object({ issueId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const issue = await ctx.prisma.issue.findFirst({
+        where: { id: input.issueId, publication: { tenantId: ctx.user.tenantId } },
+        select: { compiledPdfKey: true, compiledAt: true, compileError: true },
+      })
+      if (!issue) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (!issue.compiledPdfKey)
+        return { url: null, compiledAt: null, compileError: issue.compileError }
+      const url = await ctx.minio.client.presignedGetObject(ctx.minio.bucket, issue.compiledPdfKey, 900)
+      return { url, compiledAt: issue.compiledAt, compileError: issue.compileError }
+    }),
+
 
   list: protectedProcedure
     .input(z.object({ publicationId: z.string().uuid() }))

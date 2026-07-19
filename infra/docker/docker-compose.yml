@@ -252,6 +252,18 @@ services:
     networks: [tools]
     restart: unless-stopped
 
+  # JATS/EPUB validator — Stage 11 publication gate (epubcheck bundled in
+  # the image; local python runs degrade EPUB checks to a warning).
+  xmlvalidate:
+    build:
+      context: ../../services/xmlvalidate
+    container_name: pubflow_xmlvalidate
+    profiles: [tools]
+    ports:
+      - "4300:4300"
+    networks: [tools]
+    restart: unless-stopped
+
   # Design-tool suite for the IDML/template-porting workflow. Three JVM/BEAM
   # containers; measured 30-50% CPU each sustained even at idle. Opt-in only
   # (`--profile design`) — not needed for core submission/review/editing/publish.
