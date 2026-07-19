@@ -37,8 +37,16 @@ export class MinioStorage {
     try {
       const exists = await this.client.bucketExists(this.bucket)
       if (!exists) {
-        await this.client.makeBucket(this.bucket, 'us-east-1')
-        console.info(`✅ MinIO: bucket '${this.bucket}' created`)
+        try {
+          await this.client.makeBucket(this.bucket, 'us-east-1')
+          console.info(`✅ MinIO: bucket '${this.bucket}' created`)
+        } catch (err) {
+          // exists-check → create is racy when several processes boot at
+          // once (CI runs worker+api suites in parallel); losing is success.
+          const code = (err as { code?: string }).code
+          if (code !== 'BucketAlreadyOwnedByYou' && code !== 'BucketAlreadyExists') throw err
+          console.info(`✅ MinIO: bucket '${this.bucket}' ready (created concurrently)`)
+        }
       } else {
         console.info(`✅ MinIO: bucket '${this.bucket}' ready`)
       }

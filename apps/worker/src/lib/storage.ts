@@ -18,7 +18,16 @@ const BUCKET = process.env.MINIO_BUCKET ?? 'pubflow-files'
 // sufficient against a fresh MinIO (this is what CI hits).
 export async function ensureBucket(): Promise<void> {
   const exists = await client.bucketExists(BUCKET)
-  if (!exists) await client.makeBucket(BUCKET, 'us-east-1')
+  if (!exists) {
+    try {
+      await client.makeBucket(BUCKET, 'us-east-1')
+    } catch (err) {
+      // exists-check → create is racy when several processes boot at once
+      // (CI runs worker+api suites in parallel); losing that race is success.
+      const code = (err as { code?: string }).code
+      if (code !== 'BucketAlreadyOwnedByYou' && code !== 'BucketAlreadyExists') throw err
+    }
+  }
 }
 
 export async function downloadFromMinio(key: string): Promise<Buffer> {
