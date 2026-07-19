@@ -220,6 +220,25 @@ export const EditorialJobSchema = z.discriminatedUnion('type', [
 ])
 export type EditorialJob = z.infer<typeof EditorialJobSchema>
 
+// ── Promotion & accessibility (Phase D) ──────────────────
+export const AltTextJobSchema = z.object({
+  type: z.literal('ALT_TEXT'),
+  submissionId: z.string().uuid(),
+  assetId: z.string().uuid(),
+})
+export const PromoKitJobSchema = z.object({
+  type: z.literal('PROMO_KIT'),
+  submissionId: z.string().uuid(),
+})
+export const ArchivalJobSchema = z.object({
+  type: z.literal('ARCHIVAL'),
+  submissionId: z.string().uuid(),
+})
+export const MarketingJobSchema = z.discriminatedUnion('type', [
+  AltTextJobSchema, PromoKitJobSchema, ArchivalJobSchema,
+])
+export type MarketingJob = z.infer<typeof MarketingJobSchema>
+
 export const QUEUES = {
   PANDOC: 'pandoc',
   LATEX: 'latex',
@@ -236,5 +255,6 @@ export const QUEUES = {
   XMLVALIDATE: 'xmlvalidate',
   ISSUE: 'issue',
   EDITORIAL: 'editorial',
+  MARKETING: 'marketing',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

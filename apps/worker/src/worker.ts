@@ -16,6 +16,7 @@ import { preflightProcessor }    from './processors/preflight.js'
 import { xmlvalidateProcessor }  from './processors/xmlvalidate.js'
 import { issueProcessor }        from './processors/issue.js'
 import { editorialProcessor }    from './processors/editorial.js'
+import { marketingProcessor }    from './processors/marketing.js'
 import { ensureBucket }          from './lib/storage.js'
 
 function parseRedisUrl(url: string) {
@@ -75,6 +76,7 @@ const workers = [
   new Worker(QUEUES.XMLVALIDATE,  xmlvalidateProcessor,  { ...workerOpts, concurrency: 3 }),
   new Worker(QUEUES.ISSUE,        issueProcessor,        { ...workerOpts, concurrency: 1 }),
   new Worker(QUEUES.EDITORIAL,    editorialProcessor,    { ...workerOpts, concurrency: 2 }),
+  new Worker(QUEUES.MARKETING,    marketingProcessor,    { ...workerOpts, concurrency: 2 }),
 ]
 
 // Register the daily review-reminder cron job.

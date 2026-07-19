@@ -128,6 +128,22 @@ export async function dispatchStageBots(
           })
         }
         await notifyRole(prisma, queues, submissionId, ['ARTWORK_EDITOR'], 'COPY_EDIT_ASSIGNED')
+
+        // Phase D: draft accessibility alt-text for assets the author left
+        // blank (vision AI; skips cleanly without a key).
+        const blankAlt = await prisma.asset.findMany({
+          where: {
+            submissionId,
+            assetType: { in: ['FIGURE', 'GRAPHICAL_ABSTRACT', 'COVER'] },
+            OR: [{ altText: null }, { altText: '' }],
+          },
+          select: { id: true },
+        })
+        for (const a of blankAlt) {
+          await queues[QUEUES.MARKETING].add('alt-text', {
+            type: 'ALT_TEXT', submissionId, assetId: a.id,
+          })
+        }
         break
       }
 
@@ -152,6 +168,14 @@ export async function dispatchStageBots(
           })
         }
         await notifyRole(prisma, queues, submissionId, ['PROOF_READER', 'EDITOR_IN_CHIEF'], 'PROOF_READY')
+        break
+      }
+
+      // Published: build the promotion kit (lay summary, social drafts, SEO
+      // tags) and record archival-deposit status.
+      case 'PUBLISHED': {
+        await queues[QUEUES.MARKETING].add('promo-kit', { type: 'PROMO_KIT', submissionId })
+        await queues[QUEUES.MARKETING].add('archival', { type: 'ARCHIVAL', submissionId })
         break
       }
 

@@ -213,7 +213,7 @@ Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, 
 | Bot | Status | Notes |
 |---|---|---|
 | **Image QA Bot** | ✅ | `processors/image.ts` + `services/image` (Flask + Pillow, no ImageMagick/color-managed ICC transform — reports DPI/color-mode/embedded-ICC-name from the original, `VALIDATE_*` comparison against job targets happens worker-side). Tasks: `EXTRACT_METADATA`/`VALIDATE_DPI`/`VALIDATE_COLORMODE` (read-only), `GENERATE_THUMBNAIL` (max 400px, aspect preserved), `OPTIMIZE_WEB` (JPEG q82 if opaque, else PNG), `CONVERT_FORMAT` (fixed PNG default — job schema has no target-format field), `APPLY_ICC` (reports embedded profile only, not a real color-managed conversion — flagged in the response `errors[]` so this isn't mistaken for one). Auto-dispatched on `ARTWORK_PROCESSING` for every FIGURE/GRAPHICAL_ABSTRACT/COVER asset. |
-| **Alt-Text Generator** | 🔜 🤖 | Vision pass over approved figures → `Asset.altText` draft (accessibility + JATS `<alt-text>`); graphical abstract prioritized. |
+| **Alt-Text Generator** | ✅ 🤖 | ALT_TEXT job on the `marketing` queue (auto on ARTWORK_PROCESSING for blank-alt visual assets): vision AI drafts ≤250-char WCAG alt-text + optional long description; never overwrites author text; draft flagged `needsReview` in Asset.metadata. |
 | **Vector Converter** | 🔜 | EPS/SVG → PDF/press-ready via penpot-exporter or Inkscape service. |
 | **Figure Permissions Checker** | 🔜 | Metadata/rules pass flagging third-party figures needing clearance. |
 

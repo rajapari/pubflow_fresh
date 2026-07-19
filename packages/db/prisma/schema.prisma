@@ -403,6 +403,11 @@ model Submission {
   screeningReport  Json?
   rebuttalReport   Json?
   similarityReport Json?
+
+  // Phase D: publication promotion kit (lay summary, social-post drafts,
+  // SEO/Scholar meta tags) and archival-deposit record. Same report shape.
+  promoKit         Json?
+  archivalReport   Json?
   doi           String?
   submittedAt   DateTime?
   createdAt     DateTime         @default(now())
