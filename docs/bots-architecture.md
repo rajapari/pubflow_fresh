@@ -294,10 +294,10 @@ Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, 
 
 | Bot | Status | Notes |
 |---|---|---|
-| **Ethics & Compliance Bot** 🤖 | 🔜 | Ethics statements, trial registration, COI/funding disclosure checks at intake. |
-| **Data & Code Availability Bot** | 🔜 | Validate repository links/DOIs (Zenodo/Dryad/OSF). |
+| **Ethics & Compliance Bot** 🤖 | ✅ | ETHICS job (auto on SUBMITTED): deterministic completeness check on ethics/funding/COI statements + AI plausibility review against the abstract (e.g. human-subjects claim with no IRB approval stated) -> `Submission.complianceReport`; advisory, 'warn' without an AI key. |
+| **Data & Code Availability Bot** | ✅ | DATA_AVAILABILITY job (auto on SUBMITTED): extracts every URL/bare-DOI from the author's statement and confirms each resolves via an SSRF-safe checker (rejects private/loopback/link-local targets, re-validated on every redirect hop) -> `Submission.dataAvailabilityReport`. |
 | **AI-Content & Image-Integrity Bot** 🤖 | 🔜 | AI-text likelihood + figure-manipulation forensics; report-only. |
-| **License/Copyright Bot** | 🔜 | CC license selection, author agreement collection/tracking. |
+| **License/Copyright Bot** | ✅ | LICENSE job (auto on SUBMITTED): hard completeness gate on `Submission.licenseType` + `copyrightAgreedAt` -> `Submission.licenseReport`. Author sets both via `submission.updateCompliance`; `submission.runComplianceCheck` re-runs all three compliance bots on demand. |
 | **Post-Publication Bots** | 🔜 | Errata/retraction workflow, Crossmark updates, altmetrics tracking. |
 | **Accessibility Bot** | 🔜 | WCAG/PDF-UA checks on final outputs; consumes Alt-Text bot results. |
 

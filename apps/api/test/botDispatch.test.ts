@@ -59,6 +59,26 @@ describe('dispatchStageBots', () => {
     expect(data.files.every((f) => Boolean(f.assetId))).toBe(true)
   })
 
+  it('SUBMITTED enqueues all three compliance jobs (ethics, data availability, license)', async () => {
+    const complianceQueue = queues[QUEUES.COMPLIANCE]
+    const forThisSubmission = async () => {
+      const jobs = await complianceQueue.getJobs(['waiting', 'delayed', 'prioritized'], 0, 100)
+      return jobs.filter((j) => (j.data as { submissionId?: string }).submissionId === fx.submissionId)
+    }
+    // Self-contained regardless of test order: clear any jobs a prior
+    // SUBMITTED dispatch in this file left behind before asserting on ours.
+    for (const j of await forThisSubmission()) await j.remove()
+
+    await dispatchStageBots(prisma, queues, fx.submissionId, 'SUBMITTED')
+
+    const mine = await forThisSubmission()
+    expect(mine.map((j) => (j.data as { type: string }).type).sort()).toEqual(
+      ['DATA_AVAILABILITY', 'ETHICS', 'LICENSE'],
+    )
+    for (const j of mine) await j.remove()
+    await drainLatestJob(QUEUES.INTAKE) // drain the completeness-check job too
+  })
+
   it('SUBMITTED with no assets still runs completeness but skips intake classification', async () => {
     await prisma.asset.deleteMany({ where: { submissionId: fx.submissionId } })
     await dispatchStageBots(prisma, queues, fx.submissionId, 'SUBMITTED')

@@ -62,6 +62,12 @@ export async function dispatchStageBots(
         await queues[QUEUES.EDITORIAL].add('screening', { type: 'SCREENING', submissionId })
         await queues[QUEUES.EDITORIAL].add('similarity', { type: 'SIMILARITY', submissionId })
 
+        // Compliance: ethics/funding/COI plausibility, data-availability link
+        // checks, and the license/copyright completeness gate.
+        await queues[QUEUES.COMPLIANCE].add('ethics', { type: 'ETHICS', submissionId })
+        await queues[QUEUES.COMPLIANCE].add('data-availability', { type: 'DATA_AVAILABILITY', submissionId })
+        await queues[QUEUES.COMPLIANCE].add('license', { type: 'LICENSE', submissionId })
+
         const assets = await prisma.asset.findMany({
           where: { submissionId },
           select: {

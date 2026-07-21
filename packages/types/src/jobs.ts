@@ -239,6 +239,25 @@ export const MarketingJobSchema = z.discriminatedUnion('type', [
 ])
 export type MarketingJob = z.infer<typeof MarketingJobSchema>
 
+// ── Compliance (ethics, data availability, licensing) ────
+// One queue, three job kinds routed on data.type (editorial/marketing precedent).
+export const EthicsCheckJobSchema = z.object({
+  type: z.literal('ETHICS'),
+  submissionId: z.string().uuid(),
+})
+export const DataAvailabilityJobSchema = z.object({
+  type: z.literal('DATA_AVAILABILITY'),
+  submissionId: z.string().uuid(),
+})
+export const LicenseCheckJobSchema = z.object({
+  type: z.literal('LICENSE'),
+  submissionId: z.string().uuid(),
+})
+export const ComplianceJobSchema = z.discriminatedUnion('type', [
+  EthicsCheckJobSchema, DataAvailabilityJobSchema, LicenseCheckJobSchema,
+])
+export type ComplianceJob = z.infer<typeof ComplianceJobSchema>
+
 export const QUEUES = {
   PANDOC: 'pandoc',
   LATEX: 'latex',
@@ -256,5 +275,6 @@ export const QUEUES = {
   ISSUE: 'issue',
   EDITORIAL: 'editorial',
   MARKETING: 'marketing',
+  COMPLIANCE: 'compliance',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

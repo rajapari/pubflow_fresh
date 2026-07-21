@@ -876,4 +876,65 @@ export const submissionRouter = router({
 
       return updated
     }),
+
+  // ── Compliance (ethics, data availability, licensing) ──
+
+  // Author-editable compliance fields. Callable while still a DRAFT and
+  // right up through SUBMITTED (editors may ask the author to amend a
+  // statement without reopening the whole submission).
+  updateCompliance: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      ethicsStatement: z.string().max(5000).optional(),
+      trialRegistrationNumber: z.string().max(200).optional(),
+      fundingStatement: z.string().max(5000).optional(),
+      coiStatement: z.string().max(5000).optional(),
+      dataAvailabilityStatement: z.string().max(5000).optional(),
+      licenseType: z.enum([
+        'CC_BY', 'CC_BY_SA', 'CC_BY_NC', 'CC_BY_NC_ND', 'CC_BY_ND', 'CC0', 'ALL_RIGHTS_RESERVED',
+      ]).optional(),
+      agreeToCopyright: z.boolean().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.id, tenantId: user.tenantId, authorId: user.id },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (!['DRAFT', 'SUBMITTED', 'REVISION_REQUIRED', 'REVISED'].includes(sub.status))
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot edit compliance info while ${sub.status}` })
+
+      const { id, agreeToCopyright, ...fields } = input
+      return prisma.submission.update({
+        where: { id },
+        data: {
+          ...fields,
+          ...(agreeToCopyright !== undefined
+            ? { copyrightAgreedAt: agreeToCopyright ? new Date() : null }
+            : {}),
+        },
+      })
+    }),
+
+  // Re-run the ethics/data-availability/license bots on demand — useful
+  // after the author edits a statement without waiting for the next status
+  // transition (which already triggers all three automatically on SUBMITTED).
+  runComplianceCheck: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { user, prisma, queues } = ctx
+      const sub = await prisma.submission.findFirst({
+        where: { id: input.id, tenantId: user.tenantId },
+      })
+      if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+      const isEditor = ['SECTION_EDITOR', 'EDITOR_IN_CHIEF', 'SUPER_ADMIN'].includes(user.role)
+      if (sub.authorId !== user.id && !isEditor)
+        throw new TRPCError({ code: 'FORBIDDEN' })
+
+      await queues[QUEUES.COMPLIANCE].add('ethics', { type: 'ETHICS', submissionId: input.id })
+      await queues[QUEUES.COMPLIANCE].add('data-availability', { type: 'DATA_AVAILABILITY', submissionId: input.id })
+      await queues[QUEUES.COMPLIANCE].add('license', { type: 'LICENSE', submissionId: input.id })
+
+      return { queued: true }
+    }),
 })

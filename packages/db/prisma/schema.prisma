@@ -73,6 +73,16 @@ enum SubmissionStatus {
   WITHDRAWN
 }
 
+enum LicenseType {
+  CC_BY
+  CC_BY_SA
+  CC_BY_NC
+  CC_BY_NC_ND
+  CC_BY_ND
+  CC0
+  ALL_RIGHTS_RESERVED
+}
+
 enum ManuscriptFormat {
   DOCX
   LATEX
@@ -408,6 +418,21 @@ model Submission {
   // SEO/Scholar meta tags) and archival-deposit record. Same report shape.
   promoKit         Json?
   archivalReport   Json?
+
+  // Compliance: author-supplied ethics/funding/COI/data/licensing info,
+  // checked by the Ethics, Data-Availability, and License bots (same report
+  // shape as the other *Report fields). Advisory except License, which is a
+  // hard completeness gate authors fill in before submitting.
+  ethicsStatement           String?
+  trialRegistrationNumber   String?
+  fundingStatement          String?
+  coiStatement              String?
+  dataAvailabilityStatement String?
+  licenseType               LicenseType?
+  copyrightAgreedAt         DateTime?
+  complianceReport          Json?
+  dataAvailabilityReport    Json?
+  licenseReport             Json?
   doi           String?
   submittedAt   DateTime?
   createdAt     DateTime         @default(now())

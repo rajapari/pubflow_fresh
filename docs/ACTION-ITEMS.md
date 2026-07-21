@@ -45,7 +45,7 @@ Per-target adapters activate/finish once each credential is handed over.
 
 ## 7. Decisions that unblock the last deferred work
 1. **APC invoicing model** — pick one: (a) Stripe Invoices on acceptance, (b) internal Invoice table with manual tracking, (c) not needed. Unblocks the APC + dunning bots.
-2. **Compliance bots** (ethics / data-availability / license collection) — approve to build.
+2. ~~Compliance bots~~ — done (2026-07-21): ethics/funding/COI plausibility, data-availability link validation, license/copyright completeness gate, all auto-run on SUBMITTED. See `docs/bots-architecture.md`.
 3. **Social auto-posting** — currently drafts-only by design; requires platform API credentials + explicit approval.
 
 ## Known untested paths (need services/creds not present in dev)
