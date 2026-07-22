@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install flask gunicorn --break-system-packages
 WORKDIR /app
 COPY server.py .
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 5001
 CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "2", "--timeout", "300", "server:app"]

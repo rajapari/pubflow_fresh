@@ -3,7 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends pandoc && rm -r
 RUN pip install flask gunicorn
 WORKDIR /app
 COPY server.py .
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 4000
 CMD ["gunicorn", "--bind", "0.0.0.0:4000", "--workers", "2", "--timeout", "120", "server:app"]

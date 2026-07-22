@@ -16,7 +16,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir flask lxml gunicorn
 COPY server.py .
 
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app /opt/epubcheck
+RUN useradd -m appuser && chown -R appuser:appuser /app /opt/epubcheck
 USER appuser
 
 EXPOSE 4300
