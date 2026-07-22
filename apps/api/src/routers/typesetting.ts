@@ -1,12 +1,17 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
-import { router, protectedProcedure, editorProcedure } from '../trpc/procedures.js'
+import { router, protectedProcedure } from '../trpc/procedures.js'
 import { QUEUES, normalizeTemplateClassName } from '@pubflow/types'
 
 const TYPESETTING_STATUSES = ['ACCEPTED', 'COPY_EDITING', 'ARTWORK_PROCESSING', 'TYPESETTING', 'PROOF_REVIEW', 'APPROVED', 'PUBLISHED'] as const
+// editorProcedure requires rank >= SECTION_EDITOR (60), which excludes
+// TYPESETTER (50) — but this whole page/queue exists FOR typesetters. Using
+// protectedProcedure + this explicit list instead of editorProcedure lets
+// the role actually named after the stage use its own dedicated queue.
+const TYPESETTING_ROLES = ['TYPESETTER', 'SECTION_EDITOR', 'EDITOR_IN_CHIEF', 'SUPER_ADMIN']
 
 export const typeSettingRouter = router({
-  listSubmissions: editorProcedure
+  listSubmissions: protectedProcedure
     .input(z.object({
       status: z.enum(TYPESETTING_STATUSES).optional(),
       page:   z.number().min(1).default(1),
@@ -14,6 +19,8 @@ export const typeSettingRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const { user, prisma } = ctx
+      if (!TYPESETTING_ROLES.includes(user.role))
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only typesetters and editors can view the typesetting queue' })
       const where: Record<string, unknown> = {
         tenantId: user.tenantId,
         status: input.status ?? { in: [...TYPESETTING_STATUSES] },
@@ -53,7 +60,7 @@ export const typeSettingRouter = router({
       })
     }),
 
-  triggerJob: editorProcedure
+  triggerJob: protectedProcedure
     .input(z.object({
       submissionId: z.string().uuid(),
       engine:       z.enum(['LATEX', 'PANDOC', 'SCRIBUS']),
@@ -63,6 +70,8 @@ export const typeSettingRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const { user, prisma, queues } = ctx
+      if (!TYPESETTING_ROLES.includes(user.role))
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only typesetters and editors can trigger typesetting jobs' })
       const sub = await prisma.submission.findFirst({
         where:   { id: input.submissionId, tenantId: user.tenantId },
         include: {
@@ -133,7 +142,14 @@ export const typeSettingRouter = router({
       if (input.engine === 'PANDOC') {
         const pandocFmt = PANDOC_FORMAT[input.outputFormat]
         if (!pandocFmt) throw new TRPCError({ code: 'BAD_REQUEST', message: `${input.outputFormat} is not supported by Pandoc` })
-        jobData['inputFormat']  = sub.manuscripts[0].format.toLowerCase()
+        // PandocJobSchema.inputFormat only accepts docx/latex/markdown/odt —
+        // PDF/RTF/ZIP manuscripts have no Pandoc conversion path and would
+        // crash the worker on job.data validation if queued.
+        const PANDOC_INPUT_FORMATS = new Set(['docx', 'latex', 'markdown', 'odt'])
+        const inputFormat = sub.manuscripts[0].format.toLowerCase()
+        if (!PANDOC_INPUT_FORMATS.has(inputFormat))
+          throw new TRPCError({ code: 'BAD_REQUEST', message: `${sub.manuscripts[0].format} manuscripts cannot be converted via Pandoc` })
+        jobData['inputFormat']  = inputFormat
         jobData['outputFormat'] = pandocFmt
         jobData['options']      = { citationStyle: 'apa' }
       } else if (input.engine === 'LATEX') {

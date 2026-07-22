@@ -386,6 +386,7 @@ model Issue {
   publication Publication  @relation(fields: [publicationId], references: [id], onDelete: Cascade)
   submissions Submission[]
 
+  @@index([publicationId])
   @@map("issues")
 }
 
@@ -455,6 +456,12 @@ model Submission {
   @@index([tenantId])
   @@index([authorId])
   @@index([status])
+  // Also serves the public, unauthenticated article-by-DOI portal lookup
+  // (indexed instead of a sequential scan) and rules out two PUBLISHED
+  // submissions in the same tenant sharing a DOI. NULLs (the common case —
+  // most submissions never get one) don't collide under Postgres unique
+  // constraint semantics, so this is safe for the many doi:null rows.
+  @@unique([tenantId, doi])
   @@map("submissions")
 }
 
@@ -496,6 +503,7 @@ model Review {
 
   @@index([submissionId])
   @@index([status, dueAt])
+  @@index([reviewerId])
   @@map("reviews")
 }
 
@@ -510,6 +518,7 @@ model EditorialDecision {
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   editor     User       @relation(fields: [editorId],     references: [id])
 
+  @@index([submissionId])
   @@map("editorial_decisions")
 }
 
@@ -672,6 +681,7 @@ model CopyEdit {
   editor     User       @relation("CopyEditorAssignment", fields: [editorId], references: [id])
 
   @@index([submissionId])
+  @@index([editorId])
   @@map("copy_edits")
 }
 
@@ -769,7 +779,10 @@ model Subscription {
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Restrict, not Cascade: a tenant delete must never silently wipe billing/
+  // audit history. Offboarding a tenant means archiving its subscriptions
+  // first, not letting a cascade erase the Stripe/tax audit trail.
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
   @@map("subscriptions")

@@ -7,6 +7,7 @@ import { CreateSubmissionSchema, EditorialDecisionSchema,
 import { MinioStorage } from '../plugins/minio.js'
 import { QUEUES } from '@pubflow/types'
 import { dispatchStageBots } from '../lib/bot-dispatch.js'
+import { canAccessManuscript } from '../lib/submission-access.js'
 import { requireEnv } from '../lib/env.js'
 import { createHmac } from 'crypto'
 import { Client as MinioClient } from 'minio'
@@ -416,6 +417,10 @@ export const submissionRouter = router({
         include: { publication: { select: { title: true, publisher: { select: { name: true } } } } },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
+      const isEditorialRole = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'SUPER_ADMIN'].includes(user.role)
+      if (!isEditorialRole && sub.authorId !== user.id) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to upload a manuscript for this submission' })
+      }
 
       // Folder tree mirrors the editorial hierarchy: tenant/publisher/journal/submission
       const key = MinioStorage.buildKey(user.tenantId, input.submissionId, input.filename, {
@@ -482,6 +487,10 @@ export const submissionRouter = router({
         where: { id: input.submissionId, tenantId: user.tenantId },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
+      const isEditorialRole = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'SUPER_ADMIN'].includes(user.role)
+      if (!isEditorialRole && sub.authorId !== user.id) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to confirm an upload for this submission' })
+      }
 
       // Verify manuscript exists and belongs to this submission
       const ms = await prisma.manuscript.findFirst({
@@ -489,9 +498,11 @@ export const submissionRouter = router({
       })
       if (!ms) throw new TRPCError({ code: 'NOT_FOUND', message: 'Manuscript not found' })
 
-      // Verify file exists in MinIO
+      // Verify the actual uploaded object — never the client-supplied minioKey,
+      // which a caller could point at any object (including another tenant's)
+      // to have it processed and stored as this submission's Output.
       try {
-        const stat = await minio.client.statObject(minio.bucket, input.minioKey)
+        const stat = await minio.client.statObject(minio.bucket, ms.minioKey)
         if (!stat) throw new Error('File not found in MinIO')
       } catch (err) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'File upload verification failed' })
@@ -508,13 +519,25 @@ export const submissionRouter = router({
         },
       })
 
+      const PANDOC_INPUT_FORMATS = new Set(['docx', 'latex', 'markdown', 'odt'])
+      const inputFormat = (ms.format as string).toLowerCase()
+      if (!PANDOC_INPUT_FORMATS.has(inputFormat)) {
+        // PDF/RTF/ZIP manuscripts have no Pandoc conversion path — mark this
+        // Output as skipped rather than queuing a job the worker will 400 on.
+        await prisma.output.update({
+          where: { id: output.id },
+          data: { status: 'FAILED', errorMessage: `${ms.format} manuscripts are not normalized via Pandoc` },
+        })
+        return { success: true, manuscriptId: input.manuscriptId, outputId: output.id }
+      }
+
       // Queue Pandoc normalization job (processor expects a valid outputId)
       await queues[QUEUES.PANDOC].add('normalize-manuscript', {
         type: 'PANDOC',
         submissionId: input.submissionId,
         outputId: output.id,
-        inputMinioKey: input.minioKey,
-        inputFormat: (ms.format as string).toLowerCase(),
+        inputMinioKey: ms.minioKey,
+        inputFormat,
         outputFormat: 'docx', // Normalize to DOCX
         options: { citationStyle: 'apa' },
       })
@@ -642,8 +665,7 @@ export const submissionRouter = router({
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
 
-      // Authors can only open their own submissions
-      if (user.role === 'AUTHOR' && sub.authorId !== user.id) {
+      if (!(await canAccessManuscript(prisma, user, sub))) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot access this submission' })
       }
 
@@ -764,19 +786,27 @@ export const submissionRouter = router({
     }),
 
   getManuscriptDownloadUrl: protectedProcedure
-    .input(z.object({ submissionId: z.string().uuid() }))
+    .input(z.object({
+      submissionId: z.string().uuid(),
+      // Optional: download a specific historical version instead of latest.
+      manuscriptId: z.string().uuid().optional(),
+    }))
     .query(async ({ ctx, input }) => {
       const { user, prisma, minio } = ctx
       const sub = await prisma.submission.findFirst({
         where: { id: input.submissionId, tenantId: user.tenantId },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
-      if (user.role === 'AUTHOR' && sub.authorId !== user.id) throw new TRPCError({ code: 'FORBIDDEN' })
+      if (!(await canAccessManuscript(prisma, user, sub))) throw new TRPCError({ code: 'FORBIDDEN' })
 
-      const manuscript = await prisma.manuscript.findFirst({
-        where: { submissionId: input.submissionId, isLatest: true },
-        orderBy: { uploadedAt: 'desc' },
-      })
+      const manuscript = input.manuscriptId
+        ? await prisma.manuscript.findFirst({
+            where: { id: input.manuscriptId, submissionId: input.submissionId },
+          })
+        : await prisma.manuscript.findFirst({
+            where: { submissionId: input.submissionId, isLatest: true },
+            orderBy: { uploadedAt: 'desc' },
+          })
       if (!manuscript) throw new TRPCError({ code: 'NOT_FOUND', message: 'No manuscript uploaded yet' })
 
       // Browser-accessible URL — use the public MinIO endpoint (localhost:9000)
@@ -793,7 +823,7 @@ export const submissionRouter = router({
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      if (user.role === 'AUTHOR' && sub.authorId !== user.id) {
+      if (!(await canAccessManuscript(prisma, user, sub))) {
         throw new TRPCError({ code: 'FORBIDDEN' })
       }
 

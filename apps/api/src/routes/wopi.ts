@@ -1,8 +1,10 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import fp from 'fastify-plugin'
 import { createHmac, timingSafeEqual } from 'crypto'
+import type { AuthUser } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
 import { requireEnv } from '../lib/env.js'
+import { canAccessManuscript } from '../lib/submission-access.js'
 
 function verifyJwt(token: string, secret: string): boolean {
   const parts = token.split('.')
@@ -23,16 +25,35 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
     done(null, body)
   })
 
+  // NOTE: these three /wopi/files/* endpoints implement the WOPI protocol
+  // (CheckFileInfo/GetFile/PutFile) but are not on the live editor path —
+  // apps/api/src/routers/submission.ts's getManuscriptEditorUrl feeds
+  // OnlyOffice a presigned MinIO URL directly instead. They're kept for the
+  // documented WOPI integration (PUBFLOW_AGENT_SPEC.md) and secured the same
+  // way as every other manuscript-access path in the app: authenticate the
+  // caller, then apply canAccessManuscript (author, assigned staff, or the
+  // reviewer actually assigned — never an anonymous caller or an unrelated
+  // tenant). The :key path segments are used for routing only; authorization
+  // is always derived from the authenticated session + DB state, never from
+  // the (client-controlled) URL.
+
   /**
    * GET /wopi/files/:key — CheckFileInfo
    */
   app.get<{ Params: { key: string } }>(
     '/wopi/files/:key',
     async (req: FastifyRequest<{ Params: { key: string } }>, reply: FastifyReply) => {
+      try {
+        await app.authenticate(req)
+      } catch {
+        return reply.code(401).send({ error: 'Unauthorized' })
+      }
+      const authUser = req.user as unknown as AuthUser
+
       const parts = (req.params as { key: string }).key.split('/')
       if (parts.length < 4) return reply.code(404).send({ error: 'Invalid key format' })
 
-      const [tenantId, submissionId, manuscriptId, ...rest] = parts
+      const [, , manuscriptId, ...rest] = parts
       const filename = rest.join('/')
 
       try {
@@ -40,7 +61,10 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
           where: { id: manuscriptId },
           include: { submission: true },
         })
-        if (!manuscript || manuscript.submission.tenantId !== tenantId) {
+        if (!manuscript || manuscript.submission.tenantId !== authUser.tenantId) {
+          return reply.code(404).send({ error: 'Not found' })
+        }
+        if (!(await canAccessManuscript(prisma, authUser, manuscript.submission))) {
           return reply.code(404).send({ error: 'Not found' })
         }
 
@@ -72,6 +96,13 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
   app.get<{ Params: { key: string } }>(
     '/wopi/files/:key/contents',
     async (req: FastifyRequest<{ Params: { key: string } }>, reply: FastifyReply) => {
+      try {
+        await app.authenticate(req)
+      } catch {
+        return reply.code(401).send({ error: 'Unauthorized' })
+      }
+      const authUser = req.user as unknown as AuthUser
+
       const parts = (req.params as { key: string }).key.split('/')
       const manuscriptId = parts[2]
 
@@ -80,7 +111,12 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
           where: { id: manuscriptId },
           include: { submission: true },
         })
-        if (!manuscript) return reply.code(404).send({ error: 'Not found' })
+        if (!manuscript || manuscript.submission.tenantId !== authUser.tenantId) {
+          return reply.code(404).send({ error: 'Not found' })
+        }
+        if (!(await canAccessManuscript(prisma, authUser, manuscript.submission))) {
+          return reply.code(404).send({ error: 'Not found' })
+        }
 
         const stream = await app.minio.getFileStream(manuscript.minioKey)
         reply.type('application/octet-stream')
@@ -99,16 +135,36 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
   app.post<{ Params: { key: string } }>(
     '/wopi/files/:key/contents',
     async (req: FastifyRequest<{ Params: { key: string } }>, reply: FastifyReply) => {
+      try {
+        await app.authenticate(req)
+      } catch {
+        return reply.code(401).send({ error: 'Unauthorized' })
+      }
+      const authUser = req.user as unknown as AuthUser
+
       const parts = (req.params as { key: string }).key.split('/')
-      const [, submissionId, manuscriptId] = parts
+      // The path's submissionId is caller-supplied and untrusted — writes
+      // always target the manuscript's REAL owning submission (below), never
+      // this value, so a forged submissionId can't attach content elsewhere.
+      const manuscriptId = parts[2]
 
       try {
         const manuscript = await prisma.manuscript.findUnique({
           where: { id: manuscriptId },
           include: { submission: true },
         })
-        if (!manuscript) return reply.code(404).send({ error: 'Not found' })
+        if (!manuscript || manuscript.submission.tenantId !== authUser.tenantId) {
+          return reply.code(404).send({ error: 'Not found' })
+        }
+        // Writing is narrower than read access: the author or production/
+        // editorial staff only — never an assigned peer reviewer or a reader.
+        const canWrite =
+          manuscript.submission.authorId === authUser.id ||
+          ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR', 'ARTWORK_EDITOR', 'TYPESETTER', 'SUPER_ADMIN']
+            .includes(authUser.role)
+        if (!canWrite) return reply.code(403).send({ error: 'Forbidden' })
 
+        const submissionId = manuscript.submissionId
         const fileBuffer = req.body as Buffer
         const newVersion = manuscript.version + 1
         const newKey     = `${manuscript.minioKey}-v${newVersion}`
@@ -152,26 +208,31 @@ export const wopiRoutes = fp(async (app: FastifyInstance) => {
     async (req, reply) => {
       const { submissionId } = req.params as { submissionId: string }
 
-      // Verify OnlyOffice JWT if present. The Document Server sends it in the
-      // header configured by JWT_HEADER (AuthorizationJwt — renamed so MinIO
+      // Verify OnlyOffice JWT. The Document Server sends it in the header
+      // configured by JWT_HEADER (AuthorizationJwt — renamed so MinIO
       // presigned downloads don't see two auth mechanisms at once).
+      // The header — and its verification — are ALWAYS required, not merely
+      // checked when present: an attacker who simply omits the header used to
+      // skip verification entirely and overwrite any manuscript unchallenged.
       const authHeader = (req.headers['authorizationjwt'] ?? req.headers['authorization']) as string | undefined
-      if (authHeader) {
-        // No fallback secret: falling back to a well-known default would let
-        // anyone forge a callback that overwrites a manuscript. If the secret
-        // isn't configured we cannot verify authenticity, so fail closed.
-        let jwtSecret: string
-        try {
-          jwtSecret = requireEnv('ONLYOFFICE_JWT_SECRET')
-        } catch {
-          app.log.error({ submissionId }, 'OnlyOffice callback: ONLYOFFICE_JWT_SECRET not configured — rejecting unverifiable request')
-          return reply.code(500).send({ error: 1 })
-        }
-        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader
-        if (!verifyJwt(token, jwtSecret)) {
-          app.log.warn({ submissionId }, 'OnlyOffice callback JWT verification failed')
-          return reply.code(403).send({ error: 1 })
-        }
+      // No fallback secret: falling back to a well-known default would let
+      // anyone forge a callback that overwrites a manuscript. If the secret
+      // isn't configured we cannot verify authenticity, so fail closed.
+      let jwtSecret: string
+      try {
+        jwtSecret = requireEnv('ONLYOFFICE_JWT_SECRET')
+      } catch {
+        app.log.error({ submissionId }, 'OnlyOffice callback: ONLYOFFICE_JWT_SECRET not configured — rejecting unverifiable request')
+        return reply.code(500).send({ error: 1 })
+      }
+      if (!authHeader) {
+        app.log.warn({ submissionId }, 'OnlyOffice callback: missing signature header')
+        return reply.code(403).send({ error: 1 })
+      }
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader
+      if (!verifyJwt(token, jwtSecret)) {
+        app.log.warn({ submissionId }, 'OnlyOffice callback JWT verification failed')
+        return reply.code(403).send({ error: 1 })
       }
 
       const body = req.body as {

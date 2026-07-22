@@ -3,18 +3,21 @@ import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure } from '../trpc/procedures.js'
 import { MinioStorage } from '../plugins/minio.js'
 
+const ASSET_EDITOR_ROLES = ['SUPER_ADMIN', 'ARTWORK_EDITOR', 'SECTION_EDITOR', 'EDITOR_IN_CHIEF']
+
 export const assetRouter = router({
   // List assets for a submission
   listForSubmission: protectedProcedure
     .input(z.object({ submissionId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const submission = await ctx.prisma.submission.findUniqueOrThrow({
-        where: { id: input.submissionId },
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
       })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
 
       // Only author and editors can view assets
-      if (submission.authorId !== ctx.user.id && ctx.user.role !== 'EDITOR_IN_CHIEF' && ctx.user.role !== 'SECTION_EDITOR') {
-        throw new Error('Not authorized to view assets for this submission')
+      if (submission.authorId !== ctx.user.id && !ASSET_EDITOR_ROLES.includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to view assets for this submission' })
       }
 
       return ctx.prisma.asset.findMany({
@@ -28,22 +31,18 @@ export const assetRouter = router({
   byId: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const asset = await ctx.prisma.asset.findUniqueOrThrow({
-        where: { id: input.id },
+      const asset = await ctx.prisma.asset.findFirst({
+        where: { id: input.id, submission: { tenantId: ctx.user.tenantId } },
         include: {
           submission: true,
           uploadedBy: { select: { id: true, email: true, firstName: true, lastName: true } },
         },
       })
+      if (!asset) throw new TRPCError({ code: 'NOT_FOUND' })
 
       // Verify access
-      if (
-        asset.submission.authorId !== ctx.user.id &&
-        ctx.user.role !== 'EDITOR_IN_CHIEF' &&
-        ctx.user.role !== 'SECTION_EDITOR' &&
-        ctx.user.role !== 'ARTWORK_EDITOR'
-      ) {
-        throw new Error('Not authorized to view this asset')
+      if (asset.submission.authorId !== ctx.user.id && !ASSET_EDITOR_ROLES.includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to view this asset' })
       }
 
       return asset
@@ -60,14 +59,15 @@ export const assetRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const submission = await ctx.prisma.submission.findUniqueOrThrow({
-        where: { id: input.submissionId },
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
         include: { publication: { select: { title: true, publisher: { select: { name: true } } } } },
       })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
 
       // Only author and artwork editor can upload
-      if (submission.authorId !== ctx.user.id && ctx.user.role !== 'ARTWORK_EDITOR') {
-        throw new Error('Not authorized to upload assets for this submission')
+      if (submission.authorId !== ctx.user.id && ctx.user.role !== 'ARTWORK_EDITOR' && ctx.user.role !== 'SUPER_ADMIN') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to upload assets for this submission' })
       }
 
       // DRAFT/SUBMITTED: authors attach figures, supplementary material and the
@@ -75,7 +75,7 @@ export const assetRouter = router({
       // them. ACCEPTED/ARTWORK_PROCESSING: production-stage artwork uploads.
       const UPLOAD_STATUSES = ['DRAFT', 'SUBMITTED', 'ACCEPTED', 'ARTWORK_PROCESSING']
       if (!UPLOAD_STATUSES.includes(submission.status)) {
-        throw new Error(`Asset upload not allowed while submission is ${submission.status}`)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Asset upload not allowed while submission is ${submission.status}` })
       }
 
       // Assets live under the same publisher/journal tree as the manuscript:
@@ -109,12 +109,28 @@ export const assetRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const submission = await ctx.prisma.submission.findUniqueOrThrow({
-        where: { id: input.submissionId },
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
       })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      if (submission.authorId !== ctx.user.id && ctx.user.role !== 'ARTWORK_EDITOR') {
-        throw new Error('Not authorized to confirm uploads for this submission')
+      if (submission.authorId !== ctx.user.id && ctx.user.role !== 'ARTWORK_EDITOR' && ctx.user.role !== 'SUPER_ADMIN') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to confirm uploads for this submission' })
+      }
+
+      // Verify the object actually exists (and was uploaded under this
+      // submission's own key prefix) before registering it — otherwise a
+      // caller could point minioKey at any object, including another
+      // tenant's, and have it processed/stored under this submission.
+      const expectedPrefix = `${ctx.user.tenantId}/`
+      if (!input.minioKey.startsWith(expectedPrefix)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid storage key for this tenant' })
+      }
+      try {
+        const stat = await ctx.minio.client.statObject(ctx.minio.bucket, input.minioKey)
+        if (!stat) throw new Error('not found')
+      } catch {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'File upload verification failed' })
       }
 
       // Update or create asset
@@ -169,9 +185,10 @@ export const assetRouter = router({
       useVision: z.boolean().default(true),
     }))
     .mutation(async ({ ctx, input }) => {
-      const submission = await ctx.prisma.submission.findUniqueOrThrow({
-        where: { id: input.submissionId },
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
       })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
 
       const isEditor = ['SUPER_ADMIN', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'ARTWORK_EDITOR'].includes(ctx.user.role)
       if (submission.authorId !== ctx.user.id && !isEditor) {
@@ -210,27 +227,33 @@ export const assetRouter = router({
   approve: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== 'ARTWORK_EDITOR' && ctx.user.role !== 'SECTION_EDITOR' && ctx.user.role !== 'EDITOR_IN_CHIEF') {
-        throw new Error('Only artwork editors can approve assets')
+      if (!ASSET_EDITOR_ROLES.includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only artwork editors can approve assets' })
       }
+      const existing = await ctx.prisma.asset.findFirst({
+        where: { id: input.id, submission: { tenantId: ctx.user.tenantId } },
+      })
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      const asset = await ctx.prisma.asset.update({
+      return ctx.prisma.asset.update({
         where: { id: input.id },
         data: { status: 'APPROVED' },
       })
-
-      return asset
     }),
 
   // Reject asset with revision feedback (editors only)
   reject: protectedProcedure
     .input(z.object({ id: z.string().uuid(), reason: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== 'ARTWORK_EDITOR' && ctx.user.role !== 'SECTION_EDITOR' && ctx.user.role !== 'EDITOR_IN_CHIEF') {
-        throw new Error('Only artwork editors can reject assets')
+      if (!ASSET_EDITOR_ROLES.includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only artwork editors can reject assets' })
       }
+      const existing = await ctx.prisma.asset.findFirst({
+        where: { id: input.id, submission: { tenantId: ctx.user.tenantId } },
+      })
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND' })
 
-      const asset = await ctx.prisma.asset.update({
+      return ctx.prisma.asset.update({
         where: { id: input.id },
         data: {
           status: 'NEEDS_REVISION',
@@ -240,8 +263,6 @@ export const assetRouter = router({
           },
         },
       })
-
-      return asset
     }),
 
   // List all assets across submissions (for artwork editors/section editors)
@@ -253,8 +274,7 @@ export const assetRouter = router({
       limit: z.number().min(1).max(100).default(20),
     }))
     .query(async ({ ctx, input }) => {
-      const allowed = ['SUPER_ADMIN', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'ARTWORK_EDITOR']
-      if (!allowed.includes(ctx.user.role))
+      if (!ASSET_EDITOR_ROLES.includes(ctx.user.role))
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only editors can list all assets' })
 
       const where: Record<string, unknown> = {
@@ -284,11 +304,14 @@ export const assetRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const asset = await ctx.prisma.asset.findUniqueOrThrow({ where: { id: input.id } })
+      const asset = await ctx.prisma.asset.findFirst({
+        where: { id: input.id, submission: { tenantId: ctx.user.tenantId } },
+      })
+      if (!asset) throw new TRPCError({ code: 'NOT_FOUND' })
 
       // Only uploader or editors can delete
-      if (asset.uploadedById !== ctx.user.id && ctx.user.role !== 'ARTWORK_EDITOR' && ctx.user.role !== 'SECTION_EDITOR' && ctx.user.role !== 'EDITOR_IN_CHIEF') {
-        throw new Error('Not authorized to delete this asset')
+      if (asset.uploadedById !== ctx.user.id && !ASSET_EDITOR_ROLES.includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to delete this asset' })
       }
 
       await ctx.prisma.asset.delete({ where: { id: input.id } })

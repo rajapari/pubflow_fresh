@@ -17,13 +17,9 @@ export const reviewRouter = router({
       const { user, prisma } = ctx
 
       // Only PEER_REVIEWERs can see their assigned reviews
-      if (user.role !== 'PEER_REVIEWER' && user.role !== 'EDITOR_IN_CHIEF' && user.role !== 'SECTION_EDITOR') {
+      if (!['PEER_REVIEWER', 'EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'SUPER_ADMIN'].includes(user.role)) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only reviewers can list reviews' })
       }
-
-      const where: Record<string, unknown> = { tenantId: user.tenantId }
-      if (input.status) where['status'] = input.status
-      if (user.role === 'PEER_REVIEWER') where['reviewerId'] = user.id
 
       const [reviews, total] = await Promise.all([
         prisma.review.findMany({
@@ -109,6 +105,9 @@ export const reviewRouter = router({
         include: { author: true },
       })
       if (!sub) throw new TRPCError({ code: 'NOT_FOUND', message: 'Submission not found' })
+      if (!['DESK_REVIEW', 'PEER_REVIEW', 'REVISED'].includes(sub.status)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot invite a reviewer while the submission is ${sub.status}` })
+      }
 
       const reviewer = await prisma.user.findFirst({
         where: { id: input.reviewerId, tenantId: user.tenantId, role: 'PEER_REVIEWER' },
@@ -247,11 +246,15 @@ export const reviewRouter = router({
         orderBy: { createdAt: 'asc' },
       })
 
-      // For authors: mask confidential comments, only show public comments
+      // For authors: mask confidential comments, only show public comments.
+      // Field is `confidentialNotes` (per schema.prisma) — a prior version of
+      // this code wrote `confidentialComments`, a field that doesn't exist on
+      // Review, so the spread's real confidentialNotes value passed straight
+      // through to authors untouched instead of being masked.
       if (isAuthor) {
         return reviews.map((r) => ({
           ...r,
-          confidentialComments: null, // Authors don't see editor-only comments
+          confidentialNotes: null, // Authors don't see editor-only notes
         }))
       }
 

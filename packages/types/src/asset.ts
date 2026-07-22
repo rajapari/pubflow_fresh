@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const AssetTypeSchema = z.enum(['FIGURE','TABLE','SUPPLEMENTARY','COVER'])
+export const AssetTypeSchema = z.enum(['FIGURE','TABLE','SUPPLEMENTARY','GRAPHICAL_ABSTRACT','COVER'])
 export type AssetType = z.infer<typeof AssetTypeSchema>
 
 export const ColorModeSchema = z.enum(['RGB','CMYK','GRAYSCALE','LAB'])

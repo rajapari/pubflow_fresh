@@ -201,6 +201,34 @@ export const copyEditRouter = router({
       return { uploadUrl, minioKey: key }
     }),
 
+  // Presigned download URL for either the original manuscript or the
+  // copyeditor's submitted file — mirrors proofReview.getDownloadUrl /
+  // submission.getManuscriptDownloadUrl. The dashboard previously linked
+  // straight to a nonexistent /api/download route.
+  getDownloadUrl: protectedProcedure
+    .input(z.object({ id: z.string().uuid(), which: z.enum(['original', 'edited']) }))
+    .query(async ({ ctx, input }) => {
+      const { user, prisma, minio } = ctx
+      const ce = await prisma.copyEdit.findUnique({
+        where: { id: input.id },
+        include: {
+          submission: { include: { manuscripts: { where: { isLatest: true }, take: 1 } } },
+        },
+      })
+      if (!ce) throw new TRPCError({ code: 'NOT_FOUND' })
+      if (ce.submission.tenantId !== user.tenantId) throw new TRPCError({ code: 'FORBIDDEN' })
+      const allowed = ce.submission.authorId === user.id
+        || ce.editorId === user.id
+        || COPY_EDITOR_ROLES.includes(user.role as typeof COPY_EDITOR_ROLES[number])
+      if (!allowed) throw new TRPCError({ code: 'FORBIDDEN' })
+
+      const key = input.which === 'edited' ? ce.editedKey : ce.submission.manuscripts[0]?.minioKey
+      if (!key) throw new TRPCError({ code: 'NOT_FOUND', message: 'File not available' })
+
+      const url = await minio.client.presignedGetObject(minio.bucket, key, 900)
+      return { url }
+    }),
+
   submitEdited: protectedProcedure
     .input(z.object({
       id:       z.string().uuid(),

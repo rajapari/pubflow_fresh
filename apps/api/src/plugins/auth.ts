@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin'
 import jwtPlugin from '@fastify/jwt'
+import { randomBytes } from 'node:crypto'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { AuthUser } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
@@ -56,10 +57,20 @@ const seededTenants = new Set<string>()
 export const authPlugin = fp(async (app: FastifyInstance) => {
   const publicKey = await fetchPublicKeyWithRetry(app.log)
 
+  // Fail CLOSED, never open: if Keycloak's public key can't be obtained, do
+  // NOT fall back to a fixed/known secret — that would let anyone who reads
+  // this source forge an HS256 token and authenticate as any user. Instead
+  // configure the JWT plugin with a random, process-local secret that nobody
+  // can know or derive, so every verification attempt fails and `authenticate`
+  // uniformly returns 401 until the API is restarted with Keycloak reachable.
+  const publicKeyUnavailable = !publicKey
   await app.register(jwtPlugin, publicKey
     ? { secret: { public: publicKey }, decode: { complete: true }, verify: { algorithms: ['RS256'] } }
-    : { secret: 'pubflow-dev-placeholder' }
+    : { secret: randomBytes(48).toString('hex'), verify: { algorithms: ['HS256'] } }
   )
+  if (publicKeyUnavailable) {
+    app.log.error('⚠️  Keycloak public key unavailable — auth is running FAIL-CLOSED (every request will be 401) until the API is restarted with Keycloak reachable.')
+  }
 
   app.decorate('authenticate', async (req: FastifyRequest) => {
     try {

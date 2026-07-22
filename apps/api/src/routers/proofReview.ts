@@ -8,15 +8,16 @@ export const proofReviewRouter = router({
   listForSubmission: protectedProcedure
     .input(z.object({ submissionId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const submission = await ctx.prisma.submission.findUniqueOrThrow({
-        where: { id: input.submissionId },
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
       })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
 
       // Only editor or author can view proof reviews
       const isAuthor = submission.authorId === ctx.user.id
       const isEditor = ctx.user.role === 'EDITOR_IN_CHIEF' || ctx.user.role === 'SECTION_EDITOR'
       if (!isAuthor && !isEditor) {
-        throw new Error('Not authorized to view proof reviews for this submission')
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to view proof reviews for this submission' })
       }
 
       const reviews = await ctx.prisma.proofReview.findMany({
@@ -39,14 +40,15 @@ export const proofReviewRouter = router({
   byId: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const review = await ctx.prisma.proofReview.findUniqueOrThrow({
-        where: { id: input.id },
+      const review = await ctx.prisma.proofReview.findFirst({
+        where: { id: input.id, submission: { tenantId: ctx.user.tenantId } },
         include: {
           submission: true,
           reviewer: { select: { id: true, email: true, firstName: true, lastName: true } },
           output: true,
         },
       })
+      if (!review) throw new TRPCError({ code: 'NOT_FOUND' })
 
       // Verify access
       const isAuthor = review.submission.authorId === ctx.user.id
@@ -54,7 +56,7 @@ export const proofReviewRouter = router({
       const isEditor = ctx.user.role === 'EDITOR_IN_CHIEF' || ctx.user.role === 'SECTION_EDITOR'
 
       if (!isAuthor && !isReviewer && !isEditor) {
-        throw new Error('Not authorized to view this proof review')
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to view this proof review' })
       }
 
       return {
@@ -74,50 +76,56 @@ export const proofReviewRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== 'EDITOR_IN_CHIEF' && ctx.user.role !== 'SECTION_EDITOR') {
-        throw new Error('Only editors can assign proof reviewers')
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only editors can assign proof reviewers' })
       }
 
-      const submission = await ctx.prisma.submission.findUniqueOrThrow({
-        where: { id: input.submissionId },
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
         include: { author: true },
       })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
 
       if (submission.status !== 'TYPESETTING' && submission.status !== 'PROOF_REVIEW') {
-        throw new Error('Submission must be in TYPESETTING or PROOF_REVIEW status for proof review')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Submission must be in TYPESETTING or PROOF_REVIEW status for proof review' })
       }
 
-      const reviewer = await ctx.prisma.user.findUniqueOrThrow({
-        where: { id: input.reviewerId },
+      const reviewer = await ctx.prisma.user.findFirst({
+        where: { id: input.reviewerId, tenantId: ctx.user.tenantId },
       })
+      if (!reviewer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Reviewer not found' })
 
       if (!['SECTION_EDITOR', 'EDITOR_IN_CHIEF', 'PROOF_READER'].includes(reviewer.role)) {
-        throw new Error('User must be SECTION_EDITOR, EDITOR_IN_CHIEF, or PROOF_READER')
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'User must be SECTION_EDITOR, EDITOR_IN_CHIEF, or PROOF_READER' })
       }
 
-      const existing = await ctx.prisma.proofReview.findFirst({
-        where: {
-          submissionId: input.submissionId,
-          reviewerId: input.reviewerId,
-          round: input.round,
-          status: { in: ['OPEN', 'IN_PROGRESS'] },
-        },
-      })
-
-      if (existing) {
-        throw new Error('This reviewer already has an open proof review for this round')
-      }
-
-      const review = await ctx.prisma.proofReview.create({
-        data: {
-          submissionId: input.submissionId,
-          reviewerId: input.reviewerId,
-          round: input.round,
-          status: 'OPEN',
-        },
-        include: {
-          reviewer: { select: { id: true, email: true, firstName: true, lastName: true } },
-        },
-      })
+      // Serializable isolation closes the check-then-create race: two
+      // concurrent assign calls for the same reviewer/round can no longer
+      // both pass the "no open review yet" check and create duplicates —
+      // Postgres aborts the loser with a serialization failure instead.
+      const review = await ctx.prisma.$transaction(async (tx) => {
+        const existing = await tx.proofReview.findFirst({
+          where: {
+            submissionId: input.submissionId,
+            reviewerId: input.reviewerId,
+            round: input.round,
+            status: { in: ['OPEN', 'IN_PROGRESS'] },
+          },
+        })
+        if (existing) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'This reviewer already has an open proof review for this round' })
+        }
+        return tx.proofReview.create({
+          data: {
+            submissionId: input.submissionId,
+            reviewerId: input.reviewerId,
+            round: input.round,
+            status: 'OPEN',
+          },
+          include: {
+            reviewer: { select: { id: true, email: true, firstName: true, lastName: true } },
+          },
+        })
+      }, { isolationLevel: 'Serializable' })
 
       await ctx.prisma.workflowLog.create({
         data: {
@@ -230,13 +238,17 @@ export const proofReviewRouter = router({
       limit: z.number().min(1).max(100).default(20),
     }))
     .query(async ({ ctx, input }) => {
-      const isEditor = ctx.user.role === 'EDITOR_IN_CHIEF' || ctx.user.role === 'SECTION_EDITOR' || ctx.user.role === 'SUPER_ADMIN'
-      if (!isEditor)
-        throw new Error('Only editors can list all proof reviews')
+      const isEditor = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'SUPER_ADMIN'].includes(ctx.user.role)
+      const isProofReader = ctx.user.role === 'PROOF_READER'
+      if (!isEditor && !isProofReader)
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only editors and proof readers can list proof reviews' })
 
       const where: Record<string, unknown> = {
         submission: { tenantId: ctx.user.tenantId },
       }
+      // A proof reader's "queue" is their own assignments, not the whole
+      // tenant's — editors alone see every review across all reviewers.
+      if (isProofReader) where['reviewerId'] = ctx.user.id
       if (input.status) where['status'] = input.status
 
       const [reviews, total] = await Promise.all([
@@ -494,10 +506,11 @@ export const proofReviewRouter = router({
   deleteCorrection: protectedProcedure
     .input(z.object({ correctionId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const correction = await ctx.prisma.proofCorrection.findUniqueOrThrow({
-        where: { id: input.correctionId },
+      const correction = await ctx.prisma.proofCorrection.findFirst({
+        where: { id: input.correctionId, proofReview: { submission: { tenantId: ctx.user.tenantId } } },
         include: { proofReview: true },
       })
+      if (!correction) throw new TRPCError({ code: 'NOT_FOUND' })
       const isOwner  = correction.markedById === ctx.user.id
       const isEditor = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR'].includes(ctx.user.role)
       if (!isOwner && !isEditor) throw new TRPCError({ code: 'FORBIDDEN' })
@@ -512,15 +525,16 @@ export const proofReviewRouter = router({
   listOutputs: protectedProcedure
     .input(z.object({ submissionId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
-      const submission = await ctx.prisma.submission.findUniqueOrThrow({
-        where: { id: input.submissionId },
+      const submission = await ctx.prisma.submission.findFirst({
+        where: { id: input.submissionId, tenantId: ctx.user.tenantId },
       })
+      if (!submission) throw new TRPCError({ code: 'NOT_FOUND' })
 
       // Only editors/authors can list outputs
       const isAuthor = submission.authorId === ctx.user.id
       const isEditor = ctx.user.role === 'EDITOR_IN_CHIEF' || ctx.user.role === 'SECTION_EDITOR'
       if (!isAuthor && !isEditor) {
-        throw new Error('Not authorized')
+        throw new TRPCError({ code: 'FORBIDDEN' })
       }
 
       return ctx.prisma.output.findMany({
