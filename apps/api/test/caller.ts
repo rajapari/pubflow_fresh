@@ -87,3 +87,28 @@ export async function closeTestConnections(): Promise<void> {
     redisSingleton = null
   }
 }
+
+// vitest.config.ts runs this suite with `pool: 'forks', singleFork: true` —
+// every test file shares this one module's singletons in the same process.
+// A file that closes them in its own afterAll can pull the connection out
+// from under another file still mid-test (BullMQ getJobs() returning
+// broken entries, ioredis "Connection is closed"). Reference-count instead:
+// each file registers once at import time (before any test body runs, so
+// registration order can't race with teardown order), and the shared
+// connections only actually close once every registered file has finished.
+let activeTestFiles = 0
+let didCloseShared = false
+
+export function registerTestFileForCleanup(): () => Promise<void> {
+  activeTestFiles++
+  let didTeardownThisFile = false
+  return async () => {
+    if (didTeardownThisFile) return
+    didTeardownThisFile = true
+    activeTestFiles--
+    if (activeTestFiles === 0 && !didCloseShared) {
+      didCloseShared = true
+      await closeTestConnections()
+    }
+  }
+}

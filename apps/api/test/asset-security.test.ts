@@ -7,7 +7,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { prisma } from '../src/lib/prisma.js'
-import { makeCaller, closeTestConnections } from './caller.js'
+import { makeCaller, registerTestFileForCleanup } from './caller.js'
 
 interface Fixture {
   tenantId: string
@@ -21,6 +21,7 @@ let editor: ReturnType<typeof makeCaller>
 let superAdmin: ReturnType<typeof makeCaller>
 let author: ReturnType<typeof makeCaller>
 let outsiderEditor: ReturnType<typeof makeCaller>
+const teardownSharedConnections = registerTestFileForCleanup()
 
 beforeAll(async () => {
   const tag = `asset-sec-${randomUUID().slice(0, 8)}`
@@ -69,7 +70,7 @@ beforeAll(async () => {
 })
 afterAll(async () => {
   await fx.cleanup()
-  await closeTestConnections()
+  await teardownSharedConnections()
 })
 
 describe('asset.approve / asset.reject — tenant scoping', () => {

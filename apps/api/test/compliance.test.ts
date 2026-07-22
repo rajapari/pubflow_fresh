@@ -4,7 +4,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { QUEUES } from '@pubflow/types'
 import { prisma } from '../src/lib/prisma.js'
-import { makeCaller, getQueues, closeTestConnections } from './caller.js'
+import { makeCaller, getQueues, registerTestFileForCleanup } from './caller.js'
 import { createProofFixture, type ApiFixture } from './fixtures.js'
 
 let fx: ApiFixture
@@ -13,6 +13,7 @@ let author: ReturnType<typeof makeCaller>
 let editor: ReturnType<typeof makeCaller>
 let outsider: ReturnType<typeof makeCaller>
 const queues = getQueues()
+const teardownSharedConnections = registerTestFileForCleanup()
 
 async function drainLatestJob(queueName: string, submissionId: string) {
   const queue = queues[queueName as keyof typeof queues]
@@ -40,7 +41,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma.submission.deleteMany({ where: { id: draftId } })
   await fx.cleanup()
-  await closeTestConnections()
+  await teardownSharedConnections()
 })
 
 describe('updateCompliance', () => {

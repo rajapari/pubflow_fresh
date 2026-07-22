@@ -3,11 +3,12 @@
 // finished) its preflight check, and allow it through on pass/warn/absent.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { prisma } from '../src/lib/prisma.js'
-import { makeCaller, closeTestConnections } from './caller.js'
+import { makeCaller, registerTestFileForCleanup } from './caller.js'
 import { createProofFixture, type ApiFixture } from './fixtures.js'
 
 let fx: ApiFixture
 let editor: ReturnType<typeof makeCaller>
+const teardownSharedConnections = registerTestFileForCleanup()
 
 beforeAll(async () => {
   fx = await createProofFixture('preflight')
@@ -15,7 +16,7 @@ beforeAll(async () => {
 })
 afterAll(async () => {
   await fx.cleanup()
-  await closeTestConnections()
+  await teardownSharedConnections()
 })
 
 beforeEach(async () => {

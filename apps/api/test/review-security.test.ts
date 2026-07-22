@@ -7,7 +7,7 @@
 //      didn't exist; READER and unassigned PEER_REVIEWER fell through
 //      unchecked to manuscript access.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { makeCaller, closeTestConnections } from './caller.js'
+import { makeCaller, registerTestFileForCleanup } from './caller.js'
 import { createReviewFixture, type ReviewFixture } from './fixtures.js'
 
 let fx: ReviewFixture
@@ -17,6 +17,7 @@ let assignedReviewer: ReturnType<typeof makeCaller>
 let unassignedReviewer: ReturnType<typeof makeCaller>
 let reader: ReturnType<typeof makeCaller>
 let outsider: ReturnType<typeof makeCaller>
+const teardownSharedConnections = registerTestFileForCleanup()
 
 beforeAll(async () => {
   fx = await createReviewFixture('review-sec')
@@ -29,7 +30,7 @@ beforeAll(async () => {
 })
 afterAll(async () => {
   await fx.cleanup()
-  await closeTestConnections()
+  await teardownSharedConnections()
 })
 
 describe('review.listForSubmission — confidentialNotes masking', () => {

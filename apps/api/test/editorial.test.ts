@@ -3,12 +3,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../src/lib/prisma.js'
-import { makeCaller, closeTestConnections } from './caller.js'
+import { makeCaller, registerTestFileForCleanup } from './caller.js'
 import { createProofFixture, type ApiFixture } from './fixtures.js'
 
 let fx: ApiFixture
 let editor: ReturnType<typeof makeCaller>
 const KEY_BACKUP = process.env.ANTHROPIC_API_KEY
+const teardownSharedConnections = registerTestFileForCleanup()
 
 async function addReviewer(label: string, affiliation: string | null, email?: string) {
   return prisma.user.create({
@@ -36,7 +37,7 @@ beforeAll(async () => {
 })
 afterAll(async () => {
   await fx.cleanup()
-  await closeTestConnections()
+  await teardownSharedConnections()
   if (KEY_BACKUP !== undefined) process.env.ANTHROPIC_API_KEY = KEY_BACKUP
 })
 

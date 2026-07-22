@@ -6,11 +6,12 @@ import { randomUUID } from 'node:crypto'
 import { QUEUES } from '@pubflow/types'
 import { prisma } from '../src/lib/prisma.js'
 import { dispatchStageBots, dispatchCopyEditStyleBot } from '../src/lib/bot-dispatch.js'
-import { getQueues, closeTestConnections } from './caller.js'
+import { getQueues, registerTestFileForCleanup } from './caller.js'
 import { createProofFixture, type ApiFixture } from './fixtures.js'
 
 let fx: ApiFixture
 const queues = getQueues()
+const teardownSharedConnections = registerTestFileForCleanup()
 
 // Pull the most recent waiting job for a queue and remove it, so tests
 // don't leak jobs into the real worker's backlog.
@@ -27,7 +28,7 @@ async function drainLatestJob(queueName: string) {
 beforeAll(async () => { fx = await createProofFixture('dispatch') })
 afterAll(async () => {
   await fx.cleanup()
-  await closeTestConnections()
+  await teardownSharedConnections()
 })
 
 describe('dispatchStageBots', () => {
