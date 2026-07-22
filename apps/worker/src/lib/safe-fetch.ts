@@ -41,10 +41,18 @@ export function isPrivateIPv6(ip: string): boolean {
 }
 
 async function assertPublicHost(hostname: string): Promise<void> {
+  // WHATWG URL's .hostname keeps IPv6 literals bracketed (e.g. "[::1]"),
+  // but net.isIP() only recognizes the bare address — unbracketed, "[::1]"
+  // failed net.isIP, fell through to dns.lookup("[::1]"), and relied on
+  // that lookup failing (ENOTFOUND) to accidentally block the request.
+  // Some resolvers don't fail there, which would have let a bracketed
+  // IPv6 loopback/private literal skip the isPrivateIPv6 check entirely.
+  const bare = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname
+
   // A bare IP literal in the URL — validate directly, no DNS involved.
-  if (net.isIP(hostname)) {
-    const isPrivate = net.isIP(hostname) === 6 ? isPrivateIPv6(hostname) : isPrivateIPv4(hostname)
-    if (isPrivate) throw new Error(`URL resolves to a non-public address: ${hostname}`)
+  if (net.isIP(bare)) {
+    const isPrivate = net.isIP(bare) === 6 ? isPrivateIPv6(bare) : isPrivateIPv4(bare)
+    if (isPrivate) throw new Error(`URL resolves to a non-public address: ${bare}`)
     return
   }
   let records: Array<{ address: string; family: number }>
