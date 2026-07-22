@@ -10,10 +10,11 @@ import { FileUpload } from '@/components/ui/FileUpload'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
+import { useAuth } from '@/hooks/useAuth'
 
 function ManuscriptVersionRow({ sub, ms, router }: { sub: any; ms: any; router: ReturnType<typeof useRouter> }) {
   const downloadQ = trpc.submission.getManuscriptDownloadUrl.useQuery(
-    { submissionId: sub.id },
+    { submissionId: sub.id, manuscriptId: ms.id },
     { enabled: false }
   )
   const handleDownload = async () => {
@@ -49,6 +50,7 @@ export default function SubmissionDetailPage() {
   const params = useParams()
   const router = useRouter()
   const submissionId = params.id as string
+  const { user } = useAuth()
 
   const submissionQ = trpc.submission.byId.useQuery({ id: submissionId }) as any
   const versionsQ = trpc.submission.getManuscriptVersions.useQuery({ submissionId }, { enabled: !!submissionId }) as any
@@ -80,7 +82,7 @@ export default function SubmissionDetailPage() {
   if (!submissionQ.data) return <div className="p-8">Submission not found</div>
 
   const sub = submissionQ.data
-  const isAuthor = sub.authorId === sub.author?.id
+  const isAuthor = !!user && sub.authorId === user.id
   const isDraft = sub.status === 'DRAFT'
 
   return (

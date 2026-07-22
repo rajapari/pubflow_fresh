@@ -1,15 +1,23 @@
 'use client'
 import { useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Plus, Search } from 'lucide-react'
 import { trpc } from '@/components/providers'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatDate } from '@/lib/utils'
-import type { SubmissionStatus } from '@pubflow/types'
+import { SubmissionStatusSchema, type SubmissionStatus } from '@pubflow/types'
 
 const FILTERS = ['All','DRAFT','SUBMITTED','PEER_REVIEW','ACCEPTED','TYPESETTING','PUBLISHED','REJECTED']
 
 export default function SubmissionsPage() {
-  const [status, setStatus] = useState<SubmissionStatus | undefined>()
+  const searchParams = useSearchParams()
+  // The dashboard's pipeline breakdown links here with any status in the
+  // full enum (e.g. DESK_REVIEW, PROOF_REVIEW), not just the pill shortcuts
+  // below — validate against the full schema, not the narrower FILTERS list.
+  const initialStatusParse = SubmissionStatusSchema.safeParse(searchParams.get('status'))
+  const [status, setStatus] = useState<SubmissionStatus | undefined>(
+    initialStatusParse.success ? initialStatusParse.data : undefined,
+  )
   const [page, setPage]     = useState(1)
 
   const { data, isLoading } = trpc.submission.list.useQuery({

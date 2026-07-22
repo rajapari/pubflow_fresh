@@ -7,6 +7,8 @@ import { ChevronRight, Users, ArrowRight, XCircle, CheckCircle, Clock } from 'lu
 import { trpc } from '@/components/providers'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatDate } from '@/lib/utils'
+import { useAuth } from '@/hooks/useAuth'
+import { hasMinRole, type UserRole } from '@pubflow/types'
 
 const TABS = [
   { key: 'incoming',   label: 'Incoming',    statuses: ['SUBMITTED', 'DESK_REVIEW'] },
@@ -29,6 +31,11 @@ interface DecisionModal {
 }
 
 export default function EditorialPage() {
+  const { user } = useAuth()
+  // submission.makeDecision is a chiefEditorProcedure (rank >= EDITOR_IN_CHIEF)
+  // — SECTION_EDITOR has nav access to this page but would get a FORBIDDEN
+  // from the backend, so hide the button rather than show-then-fail.
+  const canDecide = !!user && hasMinRole(user.role as UserRole, 'EDITOR_IN_CHIEF')
   const [activeTab, setActiveTab]       = useState<TabKey>('incoming')
   const [page, setPage]                 = useState(1)
   const [assignModal, setAssignModal]   = useState<AssignModal | null>(null)
@@ -206,7 +213,7 @@ export default function EditorialPage() {
                           )}
 
                           {/* Editorial decision (for DESK_REVIEW or PEER_REVIEW stage) */}
-                          {['SUBMITTED', 'DESK_REVIEW', 'PEER_REVIEW', 'REVISED'].includes(sub.status) && (
+                          {canDecide && ['SUBMITTED', 'DESK_REVIEW', 'PEER_REVIEW', 'REVISED'].includes(sub.status) && (
                             <button
                               onClick={() => setDecisionModal({ submissionId: sub.id, submissionTitle: sub.title, currentStatus: sub.status })}
                               className="flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"

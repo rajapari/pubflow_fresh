@@ -297,9 +297,11 @@ export default function ProofReviewPage() {
                 </div>
               )}
 
-              {/* Submit form — for assigned reviewer only, when OPEN or IN_PROGRESS */}
+              {/* Submit form — for assigned reviewer only, when OPEN or IN_PROGRESS.
+                  proofReview.submit checks review.reviewerId === ctx.user.id with
+                  no editor bypass, so an editor who isn't the assignee would 403. */}
               {(selected.status === 'OPEN' || selected.status === 'IN_PROGRESS') &&
-                (user?.id === selected.reviewerId || isEditor) && (
+                user?.id === selected.reviewerId && (
                 <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
                   <h3 className="text-sm font-semibold text-gray-800">Submit Your Review</h3>
 

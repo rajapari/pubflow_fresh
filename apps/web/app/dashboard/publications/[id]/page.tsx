@@ -10,6 +10,8 @@ import {
 } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Form'
+import { useAuth } from '@/hooks/useAuth'
+import { hasMinRole, type UserRole } from '@pubflow/types'
 
 const CURRENT_YEAR = new Date().getFullYear()
 
@@ -27,6 +29,11 @@ type Tab = 'issues' | 'guidelines'
 export default function PublicationDetailPage() {
   const { id: publicationId } = useParams<{ id: string }>()
   const router = useRouter()
+  const { user } = useAuth()
+  // issue.publish and publication.update are chiefEditorProcedure (rank >=
+  // EDITOR_IN_CHIEF); issue.create/assign/remove are editorProcedure and
+  // stay open to SECTION_EDITOR — hide only what the backend would 403 on.
+  const canManage = !!user && hasMinRole(user.role as UserRole, 'EDITOR_IN_CHIEF')
 
   const pubQ    = trpc.publication.byId.useQuery({ id: publicationId })
   const issuesQ = trpc.issue.list.useQuery({ publicationId })
@@ -154,7 +161,7 @@ export default function PublicationDetailPage() {
               <Plus size={14} className="mr-1.5" /> New Issue
             </Button>
           )}
-          {activeTab === 'guidelines' && (
+          {activeTab === 'guidelines' && canManage && (
             <Button onClick={handleSaveGuidelines} loading={updateM.isPending}>
               Save Guidelines
             </Button>
@@ -232,14 +239,16 @@ export default function PublicationDetailPage() {
                               <UserCheck size={13} className="mr-1" />
                               {isAssigning ? 'Done' : 'Assign'}
                             </Button>
-                            <Button
-                              size="sm"
-                              onClick={() => handlePublish(issue.id)}
-                              loading={publishM.isPending}
-                              disabled={issue._count.submissions === 0}
-                            >
-                              <Send size={13} className="mr-1" /> Publish
-                            </Button>
+                            {canManage && (
+                              <Button
+                                size="sm"
+                                onClick={() => handlePublish(issue.id)}
+                                loading={publishM.isPending}
+                                disabled={issue._count.submissions === 0}
+                              >
+                                <Send size={13} className="mr-1" /> Publish
+                              </Button>
+                            )}
                           </>
                         )}
                         <button
@@ -417,11 +426,13 @@ export default function PublicationDetailPage() {
             </div>
           </div>
 
-          <div className="flex justify-end">
-            <Button onClick={handleSaveGuidelines} loading={updateM.isPending}>
-              Save Guidelines
-            </Button>
-          </div>
+          {canManage && (
+            <div className="flex justify-end">
+              <Button onClick={handleSaveGuidelines} loading={updateM.isPending}>
+                Save Guidelines
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

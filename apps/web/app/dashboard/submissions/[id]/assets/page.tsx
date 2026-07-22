@@ -7,11 +7,20 @@ import { AssetUpload } from '@/components/ui/AssetUpload'
 import { Button } from '@/components/ui/Form'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Loader, AlertCircle, CheckCircle, X } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+
+// Mirrors asset.ts's ASSET_EDITOR_ROLES — approve/reject are editor-only on
+// the backend, but this page is reachable by the submission's own author
+// (to upload/manage their figures), who would otherwise see buttons that
+// always 403.
+const ASSET_EDITOR_ROLES = ['SUPER_ADMIN', 'ARTWORK_EDITOR', 'SECTION_EDITOR', 'EDITOR_IN_CHIEF']
 
 export default function AssetsPage() {
   const params = useParams()
   const submissionId = params.id as string
   const [activeTab, setActiveTab] = useState<'upload' | 'manage'>('upload')
+  const { user } = useAuth()
+  const isAssetEditor = !!user && ASSET_EDITOR_ROLES.includes(user.role)
 
   const assetsQuery = trpc.asset.listForSubmission.useQuery({ submissionId })
   const approveMutation = trpc.asset.approve.useMutation()
@@ -163,18 +172,24 @@ export default function AssetsPage() {
 
                   {asset.status === 'PENDING' && (
                     <div className="flex gap-2">
-                      <Button onClick={() => handleApprove(asset.id)} variant="outline" size="sm">
-                        <CheckCircle className="h-4 w-4 mr-1" />
-                        Approve
-                      </Button>
-                      <Button onClick={() => handleReject(asset.id)} variant="outline" size="sm">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        Reject
-                      </Button>
-                      <Button onClick={() => handleDelete(asset.id)} variant="outline" size="sm">
-                        <X className="h-4 w-4 mr-1" />
-                        Delete
-                      </Button>
+                      {isAssetEditor && (
+                        <>
+                          <Button onClick={() => handleApprove(asset.id)} variant="outline" size="sm">
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Approve
+                          </Button>
+                          <Button onClick={() => handleReject(asset.id)} variant="outline" size="sm">
+                            <AlertCircle className="h-4 w-4 mr-1" />
+                            Reject
+                          </Button>
+                        </>
+                      )}
+                      {(isAssetEditor || asset.uploadedBy?.id === user?.id) && (
+                        <Button onClick={() => handleDelete(asset.id)} variant="outline" size="sm">
+                          <X className="h-4 w-4 mr-1" />
+                          Delete
+                        </Button>
+                      )}
                     </div>
                   )}
 
@@ -188,9 +203,11 @@ export default function AssetsPage() {
                             {String((asset.metadata as Record<string, unknown>).rejectionReason)}
                           </p>
                         )}
-                      <Button onClick={() => handleDelete(asset.id)} variant="outline" size="sm">
-                        Remove & Re-upload
-                      </Button>
+                      {(isAssetEditor || asset.uploadedBy?.id === user?.id) && (
+                        <Button onClick={() => handleDelete(asset.id)} variant="outline" size="sm">
+                          Remove & Re-upload
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

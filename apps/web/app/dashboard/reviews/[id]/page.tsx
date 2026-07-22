@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 const SubmitReviewSchema = z.object({
   recommendation: z.enum(['ACCEPT', 'MINOR_REVISION', 'MAJOR_REVISION', 'REJECT']),
   comments: z.string().min(50).max(10000),
-  confidentialComments: z.string().max(5000).optional(),
+  confidentialNotes: z.string().max(5000).optional(),
 })
 
 type FormData = z.infer<typeof SubmitReviewSchema>
@@ -128,8 +128,8 @@ export default function SubmitReviewPage() {
             label="Confidential Comments for Editors"
             placeholder="These comments will only be visible to the editors..."
             rows={6}
-            {...register('confidentialComments')}
-            error={errors.confidentialComments?.message}
+            {...register('confidentialNotes')}
+            error={errors.confidentialNotes?.message}
           />
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">

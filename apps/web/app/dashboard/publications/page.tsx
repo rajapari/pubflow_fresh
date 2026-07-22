@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { BookOpen, Plus, XCircle, Archive, BookMarked } from 'lucide-react'
 import { toast } from 'sonner'
 import { trpc } from '@/components/providers'
+import { useAuth } from '@/hooks/useAuth'
+import { hasMinRole, type UserRole } from '@pubflow/types'
 
 const TYPE_LABELS: Record<string, string> = {
   JOURNAL: 'Journal', BOOK: 'Book', BOOK_SERIES: 'Book Series', PROCEEDINGS: 'Proceedings',
@@ -12,6 +14,11 @@ const TYPE_LABELS: Record<string, string> = {
 
 export default function PublicationsPage() {
   const router = useRouter()
+  const { user } = useAuth()
+  // publication.create/archive/update are chiefEditorProcedure (rank >=
+  // EDITOR_IN_CHIEF) — hide the actions for lower roles instead of
+  // show-then-403.
+  const canManage = !!user && hasMinRole(user.role as UserRole, 'EDITOR_IN_CHIEF')
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ title: '', type: 'JOURNAL' as const, issn: '', isbn: '', description: '' })
 
@@ -56,12 +63,14 @@ export default function PublicationsPage() {
           <h1 className="text-2xl font-semibold text-gray-900">Publications</h1>
           <p className="mt-1 text-sm text-gray-500">Manage journals, books, and proceedings</p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 transition-colors"
-        >
-          <Plus size={16} /> New Publication
-        </button>
+        {canManage && (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 transition-colors"
+          >
+            <Plus size={16} /> New Publication
+          </button>
+        )}
       </div>
 
       {pubsQ.isLoading ? (
@@ -72,9 +81,11 @@ export default function PublicationsPage() {
         <div className="flex flex-col items-center rounded-xl border border-dashed border-gray-300 py-16">
           <BookOpen size={40} className="text-gray-300 mb-3" />
           <p className="text-sm text-gray-500 mb-2">No publications yet</p>
-          <button onClick={() => setShowCreate(true)} className="text-sm text-brand-600 hover:underline">
-            Create your first publication →
-          </button>
+          {canManage && (
+            <button onClick={() => setShowCreate(true)} className="text-sm text-brand-600 hover:underline">
+              Create your first publication →
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -104,13 +115,15 @@ export default function PublicationsPage() {
                 >
                   <BookMarked size={12} /> Manage Issues
                 </button>
-                <button
-                  onClick={() => handleArchive(pub.id)}
-                  disabled={archiveM.isPending}
-                  className="flex items-center gap-1 text-gray-400 hover:text-red-500 transition-colors"
-                >
-                  <Archive size={12} /> Archive
-                </button>
+                {canManage && (
+                  <button
+                    onClick={() => handleArchive(pub.id)}
+                    disabled={archiveM.isPending}
+                    className="flex items-center gap-1 text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <Archive size={12} /> Archive
+                  </button>
+                )}
               </div>
             </div>
           ))}

@@ -27,6 +27,16 @@ export default function CopyEditTaskPage() {
   const approveM      = trpc.copyEdit.approve.useMutation()
   const requestRevM   = trpc.copyEdit.requestRevision.useMutation()
 
+  const originalDownloadQ = trpc.copyEdit.getDownloadUrl.useQuery({ id, which: 'original' }, { enabled: false })
+  const editedDownloadQ   = trpc.copyEdit.getDownloadUrl.useQuery({ id, which: 'edited' },   { enabled: false })
+
+  const handleDownload = async (which: 'original' | 'edited') => {
+    const q = which === 'original' ? originalDownloadQ : editedDownloadQ
+    const result = await q.refetch()
+    if (result.data?.url) window.open(result.data.url, '_blank')
+    else toast.error('Could not get download link')
+  }
+
   const handleUploadAndSubmit = async () => {
     if (!file) return
     setUploading(true)
@@ -135,12 +145,13 @@ export default function CopyEditTaskPage() {
               <p className="font-medium text-gray-800">Version {manuscript.version}</p>
               <p className="text-xs text-gray-500 mt-0.5">{manuscript.format} · {(manuscript.fileSizeBytes / 1024).toFixed(0)} KB</p>
             </div>
-            <a
-              href={`/api/download?key=${encodeURIComponent(manuscript.minioKey)}`}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+            <button
+              onClick={() => handleDownload('original')}
+              disabled={originalDownloadQ.isFetching}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50"
             >
               <Download size={13} /> Download
-            </a>
+            </button>
           </div>
         </div>
       )}
@@ -219,12 +230,13 @@ export default function CopyEditTaskPage() {
           {ce.editedKey && (
             <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
               <p className="text-sm font-medium text-gray-800">Edited manuscript</p>
-              <a
-                href={`/api/download?key=${encodeURIComponent(ce.editedKey)}`}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+              <button
+                onClick={() => handleDownload('edited')}
+                disabled={editedDownloadQ.isFetching}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50"
               >
                 <Download size={13} /> Download
-              </a>
+              </button>
             </div>
           )}
 

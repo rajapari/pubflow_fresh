@@ -8,6 +8,7 @@ import { useParams } from 'next/navigation'
 import { trpc } from '@/lib/trpc-client'
 import { Button } from '@/components/ui/Form'
 import { toast } from 'sonner'
+import { useAuth } from '@/hooks/useAuth'
 import {
   MessageCircleQuestion, ListChecks, Plus, Check, X, Trash2, Send, FileText,
 } from 'lucide-react'
@@ -36,6 +37,7 @@ const QUERY_COLORS: Record<string, string> = {
 
 export default function ProofWorkbenchPage() {
   const { reviewId } = useParams<{ id: string; reviewId: string }>()
+  const { user } = useAuth()
 
   const wb = trpc.proofReview.workbench.useQuery(
     { proofReviewId: reviewId },
@@ -75,6 +77,14 @@ export default function ProofWorkbenchPage() {
   const queries = review.queries ?? []
   const corrections = review.corrections ?? []
   const readonly = review.status === 'SUBMITTED'
+  // addCorrection's own role check is narrower than workbench's `role.isEditor`
+  // (which also counts TYPESETTER as an editor) — TYPESETTER would get a
+  // FORBIDDEN from the mutation, so exclude them from the button here.
+  const canAddCorrection = role.isAuthor || role.isReviewer || (role.isEditor && user?.role !== 'TYPESETTER')
+  // answerQuery only allows EDITOR_IN_CHIEF/SECTION_EDITOR (plus the author) —
+  // narrower than workbench's `role.isEditor`, which also covers
+  // PROOF_READER/TYPESETTER.
+  const canAnswerQuery = role.isAuthor || ['EDITOR_IN_CHIEF', 'SECTION_EDITOR'].includes(user?.role ?? '')
 
   const refresh = () => wb.refetch()
 
@@ -197,7 +207,7 @@ export default function ProofWorkbenchPage() {
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
             {tab === 'corrections' && (
               <>
-                {!readonly && (
+                {!readonly && canAddCorrection && (
                   <Button variant="secondary" onClick={() => setShowCorrForm((v) => !v)} className="w-full">
                     <Plus className="mr-1 h-4 w-4" /> Mark a correction
                   </Button>
@@ -343,7 +353,7 @@ export default function ProofWorkbenchPage() {
                         <span className="font-medium">Answer:</span> {q.answer}
                       </p>
                     )}
-                    {q.status === 'OPEN' && (role.isAuthor || role.isEditor) && !readonly && (
+                    {q.status === 'OPEN' && canAnswerQuery && !readonly && (
                       <div className="mt-2 flex gap-2">
                         <input
                           placeholder="Type your answer…"
