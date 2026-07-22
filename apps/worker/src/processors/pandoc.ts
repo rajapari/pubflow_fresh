@@ -61,34 +61,42 @@ export async function pandocProcessor(job: Job) {
       },
     })
 
-    // Chain Stage-11 validation for publication formats.
-    if (!hasErrors && (d.outputFormat === 'jats' || d.outputFormat === 'epub')) {
-      await xmlvalidateQueue.add('validate-output', {
-        type: 'XMLVALIDATE',
-        submissionId: d.submissionId,
-        outputId: d.outputId,
-        kind: d.outputFormat,
-        inputMinioKey: outputKey,
-      })
-    }
+    // Everything below is a best-effort follow-up to a conversion that
+    // already succeeded (or cleanly failed and was already recorded above) —
+    // a hiccup here must not fall into the outer catch and flip the
+    // just-recorded Output status back to FAILED.
+    try {
+      // Chain Stage-11 validation for publication formats.
+      if (!hasErrors && (d.outputFormat === 'jats' || d.outputFormat === 'epub')) {
+        await xmlvalidateQueue.add('validate-output', {
+          type: 'XMLVALIDATE',
+          submissionId: d.submissionId,
+          outputId: d.outputId,
+          kind: d.outputFormat,
+          inputMinioKey: outputKey,
+        })
+      }
 
-    // Log workflow state change
-    await prisma.workflowLog.create({
-      data: {
-        submissionId: d.submissionId,
-        toStatus: hasErrors ? 'ARTWORK_PROCESSING' : 'TYPESETTING',
-        performedBy: 'SYSTEM',
-        note: `Pandoc conversion (${d.inputFormat} → ${d.outputFormat})`,
-        metadata: {
-          inputFormat: d.inputFormat,
-          outputFormat: d.outputFormat,
-          fileSizeBytes: out.length,
-          citationStyle: d.options.citationStyle,
-          errorCount: (result.errors ?? []).length,
-          warningCount: (result.warnings ?? []).length,
-        } as Prisma.InputJsonValue,
-      },
-    })
+      // Log workflow state change
+      await prisma.workflowLog.create({
+        data: {
+          submissionId: d.submissionId,
+          toStatus: hasErrors ? 'ARTWORK_PROCESSING' : 'TYPESETTING',
+          performedBy: 'SYSTEM',
+          note: `Pandoc conversion (${d.inputFormat} → ${d.outputFormat})`,
+          metadata: {
+            inputFormat: d.inputFormat,
+            outputFormat: d.outputFormat,
+            fileSizeBytes: out.length,
+            citationStyle: d.options.citationStyle,
+            errorCount: (result.errors ?? []).length,
+            warningCount: (result.warnings ?? []).length,
+          } as Prisma.InputJsonValue,
+        },
+      })
+    } catch (followUpErr) {
+      console.error(`[pandoc] Post-conversion follow-up failed for output ${d.outputId}:`, followUpErr)
+    }
 
     return { outputKey, fileSizeBytes: out.length, errors: result.errors, warnings: result.warnings }
   } catch (err) {

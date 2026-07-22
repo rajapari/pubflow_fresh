@@ -30,6 +30,11 @@ function formatDate(d: Date): string {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+// Module-level singleton, matching every other processor's pattern —
+// creating a fresh Queue (and its Redis connection) on every scheduler run
+// is a connection leak.
+const notifQueue = new Queue(QUEUES.NOTIFICATION, { connection: getConnection() })
+
 export async function schedulerProcessor(_job: Job) {
   const now          = new Date()
   const soonCutoff   = new Date(now.getTime() + REMIND_BEFORE_DAYS * 86_400_000)
@@ -61,14 +66,29 @@ export async function schedulerProcessor(_job: Job) {
     return { sent: 0, markedOverdue: 0 }
   }
 
-  const notifQueue = new Queue(QUEUES.NOTIFICATION, { connection: getConnection() })
-
   let sent = 0
   let markedOverdue = 0
 
   for (const review of reviews) {
     const isOverdue  = !!review.dueAt && review.dueAt < now
     const dueDateStr = review.dueAt ? formatDate(review.dueAt) : '(no due date)'
+
+    // Enqueue BEFORE marking lastReminderSentAt: if this review's enqueue
+    // throws (e.g. a Redis blip), we must not have already recorded it as
+    // reminded — otherwise it silently drops out of every future run's
+    // candidate set and the reviewer never gets nudged. Enqueuing twice on a
+    // retry is harmless; silently skipping a reminder forever is not.
+    await notifQueue.add(`reminder-${review.id}-${Date.now()}`, {
+      type:     'NOTIFICATION',
+      to:       [review.reviewer.email],
+      template: 'REVIEW_REMINDER',
+      data: {
+        submissionId: review.submissionId,
+        title:        review.submission.title,
+        dueDate:      dueDateStr,
+        isOverdue,
+      },
+    })
 
     // Transition status to OVERDUE when past due
     if (isOverdue) {
@@ -84,22 +104,8 @@ export async function schedulerProcessor(_job: Job) {
       })
     }
 
-    await notifQueue.add(`reminder-${review.id}-${Date.now()}`, {
-      type:     'NOTIFICATION',
-      to:       [review.reviewer.email],
-      template: 'REVIEW_REMINDER',
-      data: {
-        submissionId: review.submissionId,
-        title:        review.submission.title,
-        dueDate:      dueDateStr,
-        isOverdue,
-      },
-    })
-
     sent++
   }
-
-  await notifQueue.close()
 
   console.info(`[scheduler] Review reminders: ${sent} sent, ${markedOverdue} marked OVERDUE`)
   return { sent, markedOverdue }

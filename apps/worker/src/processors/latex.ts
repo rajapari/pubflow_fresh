@@ -59,34 +59,43 @@ export async function latexProcessor(job: Job) {
       },
     })
 
-    // PDF/X pre-press gate — only for print PDFs, only once compilation
-    // actually succeeded. submission.advanceStatus reads the report back
-    // before allowing the move into PROOF_REVIEW.
-    if (!result.errors.length && updatedOutput.format === 'PDF_PRINT') {
-      await preflightQueue.add('preflight', {
-        type: 'PREFLIGHT',
-        submissionId: d.submissionId,
-        outputId: d.outputId,
-        inputMinioKey: outputKey,
-      })
-    }
+    // Everything below is a best-effort follow-up to a compile that already
+    // succeeded (or cleanly failed and was already recorded above) — a
+    // hiccup here (e.g. a Redis blip enqueuing preflight) must not fall into
+    // the outer catch and flip the just-recorded Output status back to
+    // FAILED, erasing the fact the PDF actually compiled.
+    try {
+      // PDF/X pre-press gate — only for print PDFs, only once compilation
+      // actually succeeded. submission.advanceStatus reads the report back
+      // before allowing the move into PROOF_REVIEW.
+      if (!result.errors.length && updatedOutput.format === 'PDF_PRINT') {
+        await preflightQueue.add('preflight', {
+          type: 'PREFLIGHT',
+          submissionId: d.submissionId,
+          outputId: d.outputId,
+          inputMinioKey: outputKey,
+        })
+      }
 
-    // Log workflow state change
-    await prisma.workflowLog.create({
-      data: {
-        submissionId: d.submissionId,
-        toStatus: result.errors.length ? 'TYPESETTING' : 'PROOF_REVIEW',
-        performedBy: 'SYSTEM',
-        note: `LaTeX ${d.engine} compilation (${d.passes} passes)`,
-        metadata: {
-          engine: d.engine,
-          passes: d.passes,
-          fileSizeBytes: pdf.length,
-          errorCount: result.errors.length,
-          compileLogsLength: result.logs.length,
-        } as Prisma.InputJsonValue,
-      },
-    })
+      // Log workflow state change
+      await prisma.workflowLog.create({
+        data: {
+          submissionId: d.submissionId,
+          toStatus: result.errors.length ? 'TYPESETTING' : 'PROOF_REVIEW',
+          performedBy: 'SYSTEM',
+          note: `LaTeX ${d.engine} compilation (${d.passes} passes)`,
+          metadata: {
+            engine: d.engine,
+            passes: d.passes,
+            fileSizeBytes: pdf.length,
+            errorCount: result.errors.length,
+            compileLogsLength: result.logs.length,
+          } as Prisma.InputJsonValue,
+        },
+      })
+    } catch (followUpErr) {
+      console.error(`[latex] Post-compile follow-up failed for output ${d.outputId}:`, followUpErr)
+    }
 
     return { outputKey, fileSizeBytes: pdf.length, errors: result.errors }
   } catch (err) {

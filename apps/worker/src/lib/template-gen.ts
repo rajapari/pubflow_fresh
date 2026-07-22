@@ -134,18 +134,52 @@ ${styleDefs}
 
 import { normalizeTemplateClassName } from '@pubflow/types'
 
-const texEscape = (s: string) => s.replace(/[\\{}$&#%_^~]/g, '')
+// Proper LaTeX escaping (mirrors processors/issue.ts's texEscape) — this
+// previously stripped special characters instead of escaping them, so a
+// style/font name like "Smith & Sons" silently lost the "&" instead of
+// becoming "Smith \& Sons".
+const TEX_ESCAPES: Record<string, string> = {
+  '\\': '\\textbackslash{}',
+  '&': '\\&', '%': '\\%', '$': '\\$', '#': '\\#',
+  '_': '\\_', '{': '\\{', '}': '\\}',
+  '~': '\\textasciitilde{}', '^': '\\textasciicircum{}',
+}
+const texEscape = (s: string) => s.replace(/[\\&%$#_{}~^]/g, (ch) => TEX_ESCAPES[ch] as string)
 const macroName = (s: string) =>
-  texEscape(s).replace(/[^a-zA-Z]/g, '') || 'Unnamed'
+  s.replace(/[^a-zA-Z]/g, '') || 'Unnamed'
+
+// LaTeX \newcommand names must be pure letters, so numbered/punctuated IDML
+// style names (e.g. "Body Text 1" / "Body Text 2") can collapse onto the
+// same macroName and collide. Track names already handed out in this
+// generation run and disambiguate with an all-letter suffix (A, B, ... Z,
+// AA, ...) instead of silently overwriting the earlier \newcommand.
+function makeUniqueNamer() {
+  const seen = new Map<string, number>()
+  return (raw: string): string => {
+    const base = macroName(raw)
+    const count = seen.get(base) ?? 0
+    seen.set(base, count + 1)
+    if (count === 0) return base
+    let n = count
+    let suffix = ''
+    do {
+      suffix = String.fromCharCode(65 + ((n - 1) % 26)) + suffix
+      n = Math.floor((n - 1) / 26)
+    } while (n > 0)
+    return base + suffix
+  }
+}
 
 /** Generate a LaTeX class scaffold (.cls) from the spec. */
 export function generateLatexClass(spec: LayoutSpec, templateName: string): string {
   const pt = (v: number) => `${(Math.round(v * 100) / 100)}pt`
   const mainFont = spec.fonts?.[0]
+  const uniqueColorName = makeUniqueNamer()
+  const uniqueStyleName = makeUniqueNamer()
 
   const colorDefs = (spec.colors ?? [])
     .map((c) => {
-      const name = macroName(c.name)
+      const name = uniqueColorName(c.name)
       // IDML stores CMYK as 0–100; xcolor's cmyk model expects 0–1.
       if (c.space === 'CMYK' && c.values.length === 4)
         return `\\definecolor{${name}}{cmyk}{${c.values.map((v) => (v / 100).toFixed(3)).join(',')}}`
@@ -158,7 +192,7 @@ export function generateLatexClass(spec: LayoutSpec, templateName: string): stri
 
   const styleMacros = (spec.paragraphStyles ?? [])
     .map((s) => {
-      const name = macroName(s.name)
+      const name = uniqueStyleName(s.name)
       const size = s.fontSize ?? 10
       const leading = s.leading ?? size * 1.2
       const parts = [`\\fontsize{${size}pt}{${leading}pt}\\selectfont`]

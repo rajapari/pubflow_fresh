@@ -57,31 +57,39 @@ export async function scribusProcessor(job: Job) {
       },
     })
 
-    if (!hasErrors && updatedOutput.format === 'PDF_PRINT') {
-      await preflightQueue.add('preflight', {
-        type: 'PREFLIGHT',
-        submissionId: d.submissionId,
-        outputId: d.outputId,
-        inputMinioKey: outputKey,
-      })
-    }
+    // Everything below is a best-effort follow-up to a layout that already
+    // succeeded (or cleanly failed and was already recorded above) — a
+    // hiccup here must not fall into the outer catch and flip the
+    // just-recorded Output status back to FAILED.
+    try {
+      if (!hasErrors && updatedOutput.format === 'PDF_PRINT') {
+        await preflightQueue.add('preflight', {
+          type: 'PREFLIGHT',
+          submissionId: d.submissionId,
+          outputId: d.outputId,
+          inputMinioKey: outputKey,
+        })
+      }
 
-    // Log workflow state change
-    await prisma.workflowLog.create({
-      data: {
-        submissionId: d.submissionId,
-        toStatus: hasErrors ? 'TYPESETTING' : 'PROOF_REVIEW',
-        performedBy: 'SYSTEM',
-        note: `Scribus layout (${d.outputFormat})`,
-        metadata: {
-          outputFormat: d.outputFormat,
-          fileSizeBytes: pdf.length,
-          assetCount: d.assetMinioKeys.length,
-          errorCount: (result.errors ?? []).length,
-          warningCount: (result.warnings ?? []).length,
-        } as Prisma.InputJsonValue,
-      },
-    })
+      // Log workflow state change
+      await prisma.workflowLog.create({
+        data: {
+          submissionId: d.submissionId,
+          toStatus: hasErrors ? 'TYPESETTING' : 'PROOF_REVIEW',
+          performedBy: 'SYSTEM',
+          note: `Scribus layout (${d.outputFormat})`,
+          metadata: {
+            outputFormat: d.outputFormat,
+            fileSizeBytes: pdf.length,
+            assetCount: d.assetMinioKeys.length,
+            errorCount: (result.errors ?? []).length,
+            warningCount: (result.warnings ?? []).length,
+          } as Prisma.InputJsonValue,
+        },
+      })
+    } catch (followUpErr) {
+      console.error(`[scribus] Post-layout follow-up failed for output ${d.outputId}:`, followUpErr)
+    }
 
     return { outputKey, fileSizeBytes: pdf.length, errors: result.errors, warnings: result.warnings }
   } catch (err) {

@@ -186,6 +186,16 @@ export async function copyeditProcessor(job: Job) {
     }
 
     report.finishedAt = new Date().toISOString()
+    // Every other bot report follows the {status, ..., ranAt} convention
+    // (see preflightReport/CopyEdit.botReport doc comment in schema.prisma);
+    // this one previously had neither field, diverging from its own
+    // documented shape. 'partial' surfaces a sub-pass failure without
+    // treating the whole job as failed — the successful half's findings are
+    // still usable.
+    const hasSubError = Boolean((report.languageTool as { error?: string })?.error)
+      || Boolean((report.ai as { error?: string })?.error)
+    report.status = hasSubError ? 'partial' : 'done'
+    report.ranAt = report.finishedAt
 
     // Persist the full report alongside the copyedit assignment, and archive a
     // copy in MinIO for audit.
@@ -219,7 +229,7 @@ export async function copyeditProcessor(job: Job) {
   } catch (err) {
     await prisma.copyEdit.update({
       where: { id: d.copyEditId },
-      data:  { botReport: { error: String(err), manual } as Prisma.InputJsonValue },
+      data:  { botReport: { status: 'error', error: String(err), manual, ranAt: new Date().toISOString() } as Prisma.InputJsonValue },
     })
     throw err
   }

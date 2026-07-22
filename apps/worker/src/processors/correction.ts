@@ -69,84 +69,94 @@ export async function correctionProcessor(job: Job) {
   const data = CorrectionApplyJobSchema.parse(job.data)
   const { submissionId, requestedById } = data
 
-  const corrections = await prisma.proofCorrection.findMany({
-    where: { submissionId, status: 'ACCEPTED' },
-    orderBy: { createdAt: 'asc' },
-  })
-  if (corrections.length === 0) return { applied: 0, manual: 0, skipped: 'no accepted corrections' }
+  // Two "apply corrections" runs for the same submission (e.g. a double
+  // click, or a retry racing the original) must not both read the same
+  // isLatest manuscript and both write a new version — that clobbers one
+  // run's corrections and can leave two manuscripts marked isLatest, or two
+  // rows sharing a version number. pg_advisory_xact_lock serializes runs
+  // for the same submission and auto-releases when the transaction ends, so
+  // a second, blocked run simply re-reads state after the first commits and
+  // (correctly) finds nothing left to do.
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${submissionId}))`
 
-  const manuscript = await prisma.manuscript.findFirst({
-    where: { submissionId, isLatest: true },
-    orderBy: { uploadedAt: 'desc' },
-  })
-  if (!manuscript) throw new Error(`No manuscript for submission ${submissionId}`)
+    const corrections = await tx.proofCorrection.findMany({
+      where: { submissionId, status: 'ACCEPTED' },
+      orderBy: { createdAt: 'asc' },
+    })
+    if (corrections.length === 0) return { applied: 0, manual: 0, skipped: 'no accepted corrections' }
 
-  const flagManual = async (ids: string[], reason: string) => {
-    for (const id of ids) {
-      const c = corrections.find(x => x.id === id)!
-      await prisma.proofCorrection.update({
-        where: { id },
-        data: { note: `${c.note ? c.note + ' — ' : ''}[bot] ${reason}` },
-      })
-    }
-  }
+    const manuscript = await tx.manuscript.findFirst({
+      where: { submissionId, isLatest: true },
+      orderBy: { uploadedAt: 'desc' },
+    })
+    if (!manuscript) throw new Error(`No manuscript for submission ${submissionId}`)
 
-  // Non-DOCX manuscripts: everything goes to manual application
-  if (manuscript.format !== 'DOCX') {
-    await flagManual(corrections.map(c => c.id), `manuscript is ${manuscript.format}; apply manually`)
-    return { applied: 0, manual: corrections.length }
-  }
-
-  const docxBuf  = await downloadFromMinio(manuscript.minioKey)
-  const entries  = readZip(docxBuf)
-  const docEntry = entries.find(e => e.name === 'word/document.xml')
-  if (!docEntry) throw new Error('word/document.xml missing from DOCX')
-
-  let xml = docEntry.data.toString('utf8')
-  const applied: string[] = []
-  const manual: Array<{ id: string; reason: string }> = []
-
-  for (const c of corrections) {
-    if (c.kind === 'REPLACE' || c.kind === 'DELETE') {
-      if (!c.targetText) { manual.push({ id: c.id, reason: 'no target text recorded' }); continue }
-      const result = applyOne(xml, c.targetText, c.kind === 'DELETE' ? '' : (c.newText ?? ''))
-      if ('xml' in result) {
-        xml = result.xml
-        applied.push(c.id)
-      } else {
-        manual.push({
-          id: c.id,
-          reason: result.error === 'not-found'
-            ? 'target text not found in the manuscript'
-            : 'target text appears more than once — apply manually to the right occurrence',
+    const flagManual = async (ids: string[], reason: string) => {
+      for (const id of ids) {
+        const c = corrections.find(x => x.id === id)!
+        await tx.proofCorrection.update({
+          where: { id },
+          data: { note: `${c.note ? c.note + ' — ' : ''}[bot] ${reason}` },
         })
       }
-    } else {
-      manual.push({ id: c.id, reason: `${c.kind} corrections are positional; apply manually` })
     }
-  }
 
-  if (applied.length > 0) {
-    docEntry.data = Buffer.from(xml, 'utf8')
-    const newDocx = writeZip(entries)
+    // Non-DOCX manuscripts: everything goes to manual application
+    if (manuscript.format !== 'DOCX') {
+      await flagManual(corrections.map(c => c.id), `manuscript is ${manuscript.format}; apply manually`)
+      return { applied: 0, manual: corrections.length }
+    }
 
-    // New numbered version in the SAME folder as the source manuscript
-    // (tenant/publisher/journal/submission tree); proofed version stays immutable.
-    const filename = manuscript.minioKey.split('/').pop() ?? 'manuscript.docx'
-    const dir      = manuscript.minioKey.includes('/')
-      ? manuscript.minioKey.slice(0, manuscript.minioKey.lastIndexOf('/'))
-      : ''
-    const hash   = crc32(newDocx).toString(16).padStart(8, '0')
-    const newKey = `${dir ? dir + '/' : ''}corrected-${Date.now()}-${hash}-${filename}`
-    await uploadToMinio(newKey, newDocx,
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    const docxBuf  = await downloadFromMinio(manuscript.minioKey)
+    const entries  = readZip(docxBuf)
+    const docEntry = entries.find(e => e.name === 'word/document.xml')
+    if (!docEntry) throw new Error('word/document.xml missing from DOCX')
 
-    await prisma.$transaction([
-      prisma.manuscript.updateMany({
+    let xml = docEntry.data.toString('utf8')
+    const applied: string[] = []
+    const manual: Array<{ id: string; reason: string }> = []
+
+    for (const c of corrections) {
+      if (c.kind === 'REPLACE' || c.kind === 'DELETE') {
+        if (!c.targetText) { manual.push({ id: c.id, reason: 'no target text recorded' }); continue }
+        const result = applyOne(xml, c.targetText, c.kind === 'DELETE' ? '' : (c.newText ?? ''))
+        if ('xml' in result) {
+          xml = result.xml
+          applied.push(c.id)
+        } else {
+          manual.push({
+            id: c.id,
+            reason: result.error === 'not-found'
+              ? 'target text not found in the manuscript'
+              : 'target text appears more than once — apply manually to the right occurrence',
+          })
+        }
+      } else {
+        manual.push({ id: c.id, reason: `${c.kind} corrections are positional; apply manually` })
+      }
+    }
+
+    if (applied.length > 0) {
+      docEntry.data = Buffer.from(xml, 'utf8')
+      const newDocx = writeZip(entries)
+
+      // New numbered version in the SAME folder as the source manuscript
+      // (tenant/publisher/journal/submission tree); proofed version stays immutable.
+      const filename = manuscript.minioKey.split('/').pop() ?? 'manuscript.docx'
+      const dir      = manuscript.minioKey.includes('/')
+        ? manuscript.minioKey.slice(0, manuscript.minioKey.lastIndexOf('/'))
+        : ''
+      const hash   = crc32(newDocx).toString(16).padStart(8, '0')
+      const newKey = `${dir ? dir + '/' : ''}corrected-${Date.now()}-${hash}-${filename}`
+      await uploadToMinio(newKey, newDocx,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+
+      await tx.manuscript.updateMany({
         where: { submissionId, isLatest: true },
         data: { isLatest: false },
-      }),
-      prisma.manuscript.create({
+      })
+      await tx.manuscript.create({
         data: {
           submissionId,
           format:        'DOCX',
@@ -156,12 +166,12 @@ export async function correctionProcessor(job: Job) {
           version:       manuscript.version + 1,
           isLatest:      true,
         },
-      }),
-      prisma.proofCorrection.updateMany({
+      })
+      await tx.proofCorrection.updateMany({
         where: { id: { in: applied } },
         data: { status: 'APPLIED', resolvedAt: new Date() },
-      }),
-      prisma.workflowLog.create({
+      })
+      await tx.workflowLog.create({
         data: {
           submissionId,
           toStatus:    'TYPESETTING',
@@ -172,13 +182,13 @@ export async function correctionProcessor(job: Job) {
                 ` (requested by ${requestedById})`,
           metadata: { applied, manual },
         },
-      }),
-    ])
-  }
+      })
+    }
 
-  if (manual.length > 0) {
-    for (const m of manual) await flagManual([m.id], m.reason)
-  }
+    if (manual.length > 0) {
+      for (const m of manual) await flagManual([m.id], m.reason)
+    }
 
-  return { applied: applied.length, manual: manual.length, newVersion: applied.length > 0 ? manuscript.version + 1 : undefined }
+    return { applied: applied.length, manual: manual.length, newVersion: applied.length > 0 ? manuscript.version + 1 : undefined }
+  }, { timeout: 120_000, maxWait: 30_000 })
 }

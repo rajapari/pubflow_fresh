@@ -14,6 +14,15 @@ import { generateScribusSla, generateLatexClass, type LayoutSpec } from '../lib/
 
 const IDML_URL = process.env.IDML_SERVICE_URL ?? 'http://localhost:4100'
 
+// LayoutSpec's non-optional numeric fields — the generators divide, subtract
+// and format these directly (e.g. pageWidth - marginLeft - marginRight), so
+// a missing/non-numeric field doesn't fail loudly, it silently produces a
+// NaN-riddled .sla/.cls that still gets uploaded and marked READY.
+const REQUIRED_SPEC_FIELDS: Array<keyof LayoutSpec> = [
+  'pageWidth', 'pageHeight', 'marginTop', 'marginBottom',
+  'marginLeft', 'marginRight', 'columnCount', 'columnGutter',
+]
+
 async function extractIdmlSpec(source: Buffer): Promise<LayoutSpec> {
   const res = await fetch(`${IDML_URL}/extract`, {
     method: 'POST',
@@ -23,6 +32,10 @@ async function extractIdmlSpec(source: Buffer): Promise<LayoutSpec> {
   const json = await res.json() as { spec?: LayoutSpec; error?: string }
   if (!res.ok || !json.spec) {
     throw new Error(`IDML extraction failed: ${json.error ?? `HTTP ${res.status}`}`)
+  }
+  const missing = REQUIRED_SPEC_FIELDS.filter((f) => typeof json.spec![f] !== 'number' || Number.isNaN(json.spec![f]))
+  if (missing.length) {
+    throw new Error(`IDML extraction returned an incomplete spec (missing/non-numeric: ${missing.join(', ')})`)
   }
   return json.spec
 }
