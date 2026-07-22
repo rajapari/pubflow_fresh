@@ -6,6 +6,19 @@ const nextConfig = {
   // directly (apps/web/.next/standalone/server.js) — without this, that
   // file never gets built and the container crashes on startup.
   output: 'standalone',
+  webpack: (config) => {
+    // packages/types/src/index.ts re-exports using TS's ESM convention
+    // (`export * from './auth.js'`, pointing at the sibling auth.ts) — tsc,
+    // esbuild and Node's native ESM resolver all map that .js specifier to
+    // the .ts source automatically, but webpack's default resolver doesn't
+    // unless told to. Without this, `next build` fails with "Module not
+    // found: Can't resolve './auth.js'" (and every other barrel export).
+    config.resolve.extensionAlias = {
+      '.js': ['.ts', '.tsx', '.js'],
+      ...config.resolve.extensionAlias,
+    }
+    return config
+  },
 }
 
 // Only wrap with Sentry's build plugin when actually configured — keeps the
