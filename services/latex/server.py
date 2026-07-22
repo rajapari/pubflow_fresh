@@ -2,6 +2,7 @@ import base64, os, subprocess, tempfile
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB — ported .cls resources can embed fonts
 
 @app.route('/health')
 def health():
@@ -41,9 +42,14 @@ def compile_latex():
                      '-output-directory', tmp, tex],
                     capture_output=True, text=True, timeout=240, cwd=tmp)
                 logs.append(f'Pass {i+1}:\n{r.stdout}')
-                if r.returncode != 0 and i == 0:
-                    return jsonify({'error': 'Compile failed', 'log': '\n'.join(logs),
-                                    'errors': ['Compile failed'], 'logs': '\n'.join(logs)}), 500
+                # Every pass matters, not just the first: passes 2+ resolve
+                # cross-refs/TOC/bibliography, and a failure there was
+                # previously ignored as long as pass 1 had already written a
+                # (now stale) PDF — silently returning outdated output as
+                # success.
+                if r.returncode != 0:
+                    return jsonify({'error': f'Compile failed on pass {i+1}', 'log': '\n'.join(logs),
+                                    'errors': [f'Compile failed on pass {i+1}'], 'logs': '\n'.join(logs)}), 500
 
             if not os.path.exists(pdf):
                 return jsonify({'error': 'PDF not generated', 'log': '\n'.join(logs),

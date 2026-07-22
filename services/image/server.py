@@ -39,6 +39,7 @@ from flask import Flask, request, jsonify
 from PIL import Image
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB — high-res print figures
 
 THUMBNAIL_MAX_DIM = 400
 

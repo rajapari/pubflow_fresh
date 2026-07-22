@@ -23,8 +23,12 @@ from flask import Flask, request, jsonify
 from lxml import etree
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB — EPUBs bundle images
 
 EPUBCHECK_JAR = os.environ.get('EPUBCHECK_JAR', '/opt/epubcheck/epubcheck.jar')
+
+# Never resolve DTDs/external entities from submitted JATS XML.
+_XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False, load_dtd=False)
 
 FAIL = 'fail'
 WARN = 'warn'
@@ -53,7 +57,7 @@ JATS_REQUIRED = [
 def validate_jats(raw: bytes):
     checks = []
     try:
-        root = etree.fromstring(raw)
+        root = etree.fromstring(raw, parser=_XML_PARSER)
     except etree.XMLSyntaxError as e:
         return FAIL, [check('error', 'not-well-formed', str(e))]
 

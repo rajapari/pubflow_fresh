@@ -16,5 +16,8 @@ WORKDIR /app
 RUN pip install --no-cache-dir flask lxml gunicorn
 COPY server.py .
 
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app /opt/epubcheck
+USER appuser
+
 EXPOSE 4300
 CMD ["gunicorn", "--bind", "0.0.0.0:4300", "--timeout", "240", "server:app"]

@@ -2,6 +2,7 @@ import base64, os, subprocess, tempfile
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB
 
 FORMAT_EXT = {
     'docx':'.docx','latex':'.tex','markdown':'.md','odt':'.odt',
@@ -13,7 +14,7 @@ PANDOC_TO   = {'html':'html5','epub':'epub3','jats':'jats','docx':'docx',
 
 @app.route('/health')
 def health():
-    r = subprocess.run(['pandoc','--version'], capture_output=True, text=True)
+    r = subprocess.run(['pandoc','--version'], capture_output=True, text=True, timeout=10)
     return jsonify({'status':'ok','pandoc': r.stdout.split('\n')[0]})
 
 @app.route('/convert', methods=['POST'])

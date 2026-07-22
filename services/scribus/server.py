@@ -2,6 +2,7 @@ import base64, json, os, subprocess, tempfile
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB — templates + embedded assets
 
 @app.route('/health')
 def health():
@@ -35,7 +36,16 @@ def layout():
                     ['scribus','--no-gui','--python-script','/app/scripts/layout.py', sla],
                     capture_output=True, text=True, timeout=240, env=env)
             finally:
+                # terminate() alone leaves a zombie until something reaps
+                # it — wait() collects the exit status; a hung Xvfb that
+                # ignores SIGTERM gets a hard kill so this handler can't leak
+                # a process per request.
                 xvfb.terminate()
+                try:
+                    xvfb.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    xvfb.kill()
+                    xvfb.wait()
 
             if not os.path.exists(out):
                 return jsonify({'error': 'PDF not generated', 'log': r.stderr}), 500

@@ -17,6 +17,33 @@ from flask import Flask, request, jsonify
 from lxml import etree
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB — IDML packages embed fonts/images
+
+# Never resolve DTDs/external entities — an IDML part crafted with an XXE
+# payload (<!ENTITY xxe SYSTEM "file:///etc/passwd">) must not be able to
+# read local files or reach the network through this parser.
+_XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False, load_dtd=False)
+
+# Zip-bomb guard: a crafted .idml can claim a tiny compressed size but expand
+# to gigabytes on read(). Cap both a single part and the package as a whole
+# before anything is decompressed.
+MAX_ENTRY_UNCOMPRESSED = 50 * 1024 * 1024
+MAX_TOTAL_UNCOMPRESSED = 300 * 1024 * 1024
+
+
+def _check_zip_size(z):
+    total = 0
+    for info in z.infolist():
+        if info.file_size > MAX_ENTRY_UNCOMPRESSED:
+            raise ValueError(f'{info.filename} exceeds the maximum allowed part size')
+        total += info.file_size
+        if total > MAX_TOTAL_UNCOMPRESSED:
+            raise ValueError('IDML package exceeds the maximum allowed uncompressed size')
+
+
+def _parse(data):
+    return etree.parse(io.BytesIO(data), parser=_XML_PARSER)
+
 
 # IDML namespaces are noisy; we match on local-name() everywhere instead.
 
@@ -45,7 +72,7 @@ def extract_preferences(z):
     """Document setup: page size, bleed, columns."""
     spec = {}
     try:
-        tree = etree.parse(io.BytesIO(z.read('Resources/Preferences.xml')))
+        tree = _parse(z.read('Resources/Preferences.xml'))
     except KeyError:
         return spec
     for prefs in _find_all(tree, 'DocumentPreference'):
@@ -74,7 +101,7 @@ def extract_margins_from_masters(z, spec):
         return spec
     names = [n for n in z.namelist() if n.startswith('MasterSpreads/')]
     for name in sorted(names)[:1]:
-        tree = etree.parse(io.BytesIO(z.read(name)))
+        tree = _parse(z.read(name))
         for margins in _find_all(tree, 'MarginPreference'):
             spec['marginTop'] = _num(_attr(margins, 'Top'), 36)
             spec['marginBottom'] = _num(_attr(margins, 'Bottom'), 36)
@@ -89,7 +116,7 @@ def extract_margins_from_masters(z, spec):
 def extract_fonts(z):
     fonts = []
     try:
-        tree = etree.parse(io.BytesIO(z.read('Resources/Fonts.xml')))
+        tree = _parse(z.read('Resources/Fonts.xml'))
     except KeyError:
         return fonts
     for family in _find_all(tree, 'FontFamily'):
@@ -102,7 +129,7 @@ def extract_fonts(z):
 def extract_colors(z):
     colors = []
     try:
-        tree = etree.parse(io.BytesIO(z.read('Resources/Graphic.xml')))
+        tree = _parse(z.read('Resources/Graphic.xml'))
     except KeyError:
         return colors
     for color in _find_all(tree, 'Color'):
@@ -132,7 +159,7 @@ def _style_common(el):
 def extract_styles(z):
     para, char = [], []
     try:
-        tree = etree.parse(io.BytesIO(z.read('Resources/Styles.xml')))
+        tree = _parse(z.read('Resources/Styles.xml'))
     except KeyError:
         return para, char
     for st in _find_all(tree, 'ParagraphStyle'):
@@ -167,6 +194,7 @@ def extract():
         d = request.get_json(force=True)
         raw = base64.b64decode(d.get('content', ''))
         z = zipfile.ZipFile(io.BytesIO(raw))
+        _check_zip_size(z)
 
         mimetype = ''
         try:
@@ -195,6 +223,8 @@ def extract():
                 spec[key] = 56.693  # 20 mm
         spec.setdefault('columnCount', 1)
         spec.setdefault('columnGutter', 12)
+        for key in ('bleedTop', 'bleedBottom', 'bleedInside', 'bleedOutside'):
+            spec.setdefault(key, 0)
 
         return jsonify({'spec': spec})
     except zipfile.BadZipFile:

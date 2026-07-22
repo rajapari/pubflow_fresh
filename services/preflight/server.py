@@ -27,6 +27,7 @@ import pikepdf
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB — print-ready PDFs
 
 # The 14 standard PDF fonts never need embedding — every PDF-compliant
 # renderer/printer ships them. Matched case-insensitively against the
