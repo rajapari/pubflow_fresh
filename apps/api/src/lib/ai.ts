@@ -6,16 +6,26 @@ const MODEL   = process.env.ANTHROPIC_MODEL    ?? 'claude-sonnet-5'
 const VERSION = process.env.ANTHROPIC_VERSION  ?? '2023-06-01'
 const TIMEOUT = Number(process.env.ANTHROPIC_TIMEOUT_MS ?? 60_000)
 
+// Two separate console.anthropic.com API keys ("pubflow-dev-worker" /
+// "pubflow-prod-worker") so dev usage/spend never shares a budget or rate
+// limit with production. Selected by NODE_ENV, read fresh on every call
+// (not cached at module load) so tests can flip it at runtime.
+function resolveApiKey(): string | undefined {
+  return process.env.NODE_ENV === 'production'
+    ? process.env.ANTHROPIC_API_KEY_PROD
+    : process.env.ANTHROPIC_API_KEY_DEV
+}
+
 export function aiEnabled(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY)
+  return Boolean(resolveApiKey())
 }
 
 export async function aiText(
   prompt: string,
   opts: { system?: string; maxTokens?: number } = {},
 ): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('AI unavailable: ANTHROPIC_API_KEY is not set')
+  const apiKey = resolveApiKey()
+  if (!apiKey) throw new Error('AI unavailable: set ANTHROPIC_API_KEY_DEV (or ANTHROPIC_API_KEY_PROD when NODE_ENV=production)')
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT)

@@ -155,12 +155,12 @@ describe('role enum parity (Zod ↔ Prisma)', () => {
 })
 
 describe('AI client', () => {
-  const KEY_BACKUP = process.env.ANTHROPIC_API_KEY
+  const KEY_BACKUP = process.env.ANTHROPIC_API_KEY_DEV
   beforeEach(() => { vi.unstubAllGlobals() })
   afterEach(() => {
     vi.unstubAllGlobals()
-    if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY
-    else process.env.ANTHROPIC_API_KEY = KEY_BACKUP
+    if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY_DEV
+    else process.env.ANTHROPIC_API_KEY_DEV = KEY_BACKUP
   })
 
   async function freshAi() {
@@ -179,48 +179,48 @@ describe('AI client', () => {
 
   it('aiEnabled reflects env key presence', async () => {
     const ai = await freshAi()
-    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY_DEV
     expect(ai.aiEnabled()).toBe(false)
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     expect(ai.aiEnabled()).toBe(true)
   })
 
   it('throws a clear error when key missing', async () => {
     const ai = await freshAi()
-    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY_DEV
     await expect(ai.aiText('hi')).rejects.toThrow(/ANTHROPIC_API_KEY/)
   })
 
   it('aiJSON parses raw JSON', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     stubFetchReturning('{"index": 2}')
     const ai = await freshAi()
     expect(await ai.aiJSON<{ index: number }>('x')).toEqual({ index: 2 })
   })
 
   it('aiJSON strips ```json fences', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     stubFetchReturning('```json\n{"a": [1,2]}\n```')
     const ai = await freshAi()
     expect(await ai.aiJSON('x')).toEqual({ a: [1, 2] })
   })
 
   it('aiJSON extracts JSON embedded in prose as last resort', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     stubFetchReturning('Sure! Here is the result: {"ok": true} Hope that helps.')
     const ai = await freshAi()
     expect(await ai.aiJSON('x')).toEqual({ ok: true })
   })
 
   it('aiJSON throws on non-JSON output', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     stubFetchReturning('I cannot answer that.')
     const ai = await freshAi()
     await expect(ai.aiJSON('x')).rejects.toThrow(/valid JSON/)
   })
 
   it('surfaces API errors with message', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: false,
       status: 401,

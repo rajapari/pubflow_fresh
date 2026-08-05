@@ -8,7 +8,7 @@ import { createProofFixture, type ApiFixture } from './fixtures.js'
 
 let fx: ApiFixture
 let editor: ReturnType<typeof makeCaller>
-const KEY_BACKUP = process.env.ANTHROPIC_API_KEY
+const KEY_BACKUP = process.env.ANTHROPIC_API_KEY_DEV
 const teardownSharedConnections = registerTestFileForCleanup()
 
 async function addReviewer(label: string, affiliation: string | null, email?: string) {
@@ -23,7 +23,7 @@ async function addReviewer(label: string, affiliation: string | null, email?: st
 }
 
 beforeAll(async () => {
-  delete process.env.ANTHROPIC_API_KEY // deterministic paths only
+  delete process.env.ANTHROPIC_API_KEY_DEV // deterministic paths only
   fx = await createProofFixture('edint')
   editor = makeCaller({ id: fx.editorId, tenantId: fx.tenantId, role: 'SECTION_EDITOR' })
   await prisma.user.update({ where: { id: fx.authorId }, data: { affiliation: 'Uni A' } })
@@ -38,7 +38,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await fx.cleanup()
   await teardownSharedConnections()
-  if (KEY_BACKUP !== undefined) process.env.ANTHROPIC_API_KEY = KEY_BACKUP
+  if (KEY_BACKUP !== undefined) process.env.ANTHROPIC_API_KEY_DEV = KEY_BACKUP
 })
 
 describe('suggestReviewers', () => {

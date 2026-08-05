@@ -9,18 +9,18 @@ import { prisma } from '../src/lib/prisma.js'
 import { createFixture, uploadFixture, TINY_PNG, type Fixture } from './helpers.js'
 
 let fx: Fixture
-const KEY_BACKUP = process.env.ANTHROPIC_API_KEY
+const KEY_BACKUP = process.env.ANTHROPIC_API_KEY_DEV
 
 beforeAll(async () => { fx = await createFixture('marketing') })
 afterAll(async () => {
   await fx.cleanup()
-  if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY
-  else process.env.ANTHROPIC_API_KEY = KEY_BACKUP
+  if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY_DEV
+  else process.env.ANTHROPIC_API_KEY_DEV = KEY_BACKUP
 })
 afterEach(() => vi.unstubAllGlobals())
 
 function stubAi(json: unknown) {
-  process.env.ANTHROPIC_API_KEY = 'test-key'
+  process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true, status: 200,
     json: async () => ({ content: [{ type: 'text', text: JSON.stringify(json) }] }),
@@ -78,7 +78,7 @@ describe('ALT_TEXT', () => {
   })
 
   it('skips cleanly without an AI key', async () => {
-    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY_DEV
     const asset = await makeAsset(null)
     const report = await marketingProcessor({
       data: { type: 'ALT_TEXT', submissionId: fx.submissionId, assetId: asset.id },
@@ -101,7 +101,7 @@ describe('ALT_TEXT', () => {
   })
 
   it('skips non-vision mime types', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     const asset = await makeAsset(null, 'application/postscript')
     const report = await marketingProcessor({
       data: { type: 'ALT_TEXT', submissionId: fx.submissionId, assetId: asset.id },
@@ -112,7 +112,7 @@ describe('ALT_TEXT', () => {
 
 describe('PROMO_KIT', () => {
   it('without AI: partial kit still carries deterministic SEO tags', async () => {
-    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY_DEV
     const report = await marketingProcessor({
       data: { type: 'PROMO_KIT', submissionId: fx.submissionId },
     } as Job)

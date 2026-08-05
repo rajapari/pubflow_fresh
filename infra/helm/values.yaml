@@ -182,7 +182,7 @@ secrets: {}
 #   minioSecretKey: ""                    # DO Spaces secret key
 #   keycloakAdminPassword: ""
 #   onlyofficeJwtSecret: ""                # must match nothing else — generate a random 32+ char string
-#   anthropicApiKey: ""
+#   anthropicApiKey: ""                    # PROD key only — becomes ANTHROPIC_API_KEY_PROD
 #   stripeSecretKey: ""
 #   stripeWebhookSecret: ""
 #   crossrefLoginId: ""

@@ -4,9 +4,9 @@
 
 ## 1. Activate the AI bots (~15 min)
 All AI bots (intake vision, AI copyedit, screening, rebuttal coverage, reviewer re-rank, decision letters, alt-text, promo kit) currently write `status: "skipped"` reports.
-1. Create a key at console.anthropic.com (set a spend limit).
-2. Dev: `ANTHROPIC_API_KEY=...` in root `.env`; restart the worker.
-3. Prod: GitHub repo secret `ANTHROPIC_API_KEY` (Helm already injects it).
+1. Create two keys at console.anthropic.com (set spend limits on both) — one per environment, e.g. `pubflow-dev-worker` and `pubflow-prod-worker`, so dev usage never shares a budget/rate limit with prod. Selected automatically by `NODE_ENV` (`apps/api/src/lib/ai.ts` / `apps/worker/src/lib/ai.ts`).
+2. Dev: `ANTHROPIC_API_KEY_DEV=...` in root `.env`; restart the worker.
+3. Prod: GitHub repo secret `ANTHROPIC_API_KEY_PROD` (Helm already injects it as `ANTHROPIC_API_KEY_PROD`, read only when `NODE_ENV=production`).
 4. Verify: submit a test manuscript → `Submission.screeningReport.status === "done"`.
 
 ## 2. Similarity provider (decision + signup)

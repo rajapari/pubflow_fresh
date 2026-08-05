@@ -10,7 +10,8 @@
 //               Submission.promoKit. Drafts only; humans post.
 //   ARCHIVAL  — deposit seam (DOAJ/Portico/LOCKSS); records exactly why it
 //               did not run until credentials are configured.
-// Every AI path degrades to a 'skipped' report without ANTHROPIC_API_KEY.
+// Every AI path degrades to a 'skipped' report without an Anthropic API key
+// (ANTHROPIC_API_KEY_DEV / ANTHROPIC_API_KEY_PROD).
 import type { Job } from 'bullmq'
 import type { Prisma } from '@pubflow/db'
 import { MarketingJobSchema } from '@pubflow/types'
@@ -38,7 +39,7 @@ async function runAltText(submissionId: string, assetId: string): Promise<Report
     return { status: 'skipped', reason: 'Author already provided alt-text' }
   }
   if (!aiEnabled()) {
-    return { status: 'skipped', reason: 'AI not configured — alt-text drafting requires ANTHROPIC_API_KEY' }
+    return { status: 'skipped', reason: 'AI not configured — alt-text drafting requires an Anthropic API key' }
   }
   if (!VISION_MIME.has(asset.mimeType.toLowerCase())) {
     return { status: 'skipped', reason: `Unsupported image type for vision: ${asset.mimeType}` }

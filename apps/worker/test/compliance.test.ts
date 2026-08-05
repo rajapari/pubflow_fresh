@@ -76,13 +76,13 @@ describe('extractLinks', () => {
 
 describe('complianceProcessor', () => {
   let fx: Fixture
-  const KEY_BACKUP = process.env.ANTHROPIC_API_KEY
+  const KEY_BACKUP = process.env.ANTHROPIC_API_KEY_DEV
 
   beforeAll(async () => { fx = await createFixture('compliance') })
   afterAll(async () => {
     await fx.cleanup()
-    if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY
-    else process.env.ANTHROPIC_API_KEY = KEY_BACKUP
+    if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY_DEV
+    else process.env.ANTHROPIC_API_KEY_DEV = KEY_BACKUP
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -91,7 +91,7 @@ describe('complianceProcessor', () => {
 
   describe('ETHICS', () => {
     it('flags missing statements deterministically without AI', async () => {
-      delete process.env.ANTHROPIC_API_KEY
+      delete process.env.ANTHROPIC_API_KEY_DEV
       const report = await run('ETHICS')
       expect(report).toMatchObject({ status: 'warn' })
       expect((report as { missing: string[] }).missing).toEqual(
@@ -108,7 +108,7 @@ describe('complianceProcessor', () => {
           coiStatement: 'The authors declare no conflict of interest.',
         },
       })
-      process.env.ANTHROPIC_API_KEY = 'test-key'
+      process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
       vi.stubGlobal('fetch', vi.fn(async () => ({
         ok: true, status: 200,
         json: async () => ({

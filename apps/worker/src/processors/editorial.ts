@@ -63,7 +63,7 @@ async function runScreening(submissionId: string): Promise<Report> {
   })
 
   if (!aiEnabled()) {
-    return { status: 'skipped', reason: 'AI not configured — screening requires ANTHROPIC_API_KEY' }
+    return { status: 'skipped', reason: 'AI not configured — screening requires an Anthropic API key' }
   }
 
   const system =
@@ -123,7 +123,7 @@ async function runRebuttal(submissionId: string): Promise<Report> {
   if (!aiEnabled()) {
     return {
       status: 'skipped',
-      reason: 'AI not configured — coverage mapping requires ANTHROPIC_API_KEY',
+      reason: 'AI not configured — coverage mapping requires an Anthropic API key',
       reviewCount: reviews.length,
     }
   }

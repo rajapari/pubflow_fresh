@@ -96,7 +96,7 @@ The `intake` queue carries two job kinds: `INTAKE` (file classification) and `CO
 
 - Direct `fetch` to the Anthropic Messages API — **no SDK dependency**.
 - `aiEnabled()` → boolean gate; `aiText(prompt, opts)` → free text; `aiJSON<T>(prompt, opts)` → fence-stripped, validated JSON; `opts.images[]` → base64 vision inputs.
-- Env vars: `ANTHROPIC_API_KEY` (required to enable), `ANTHROPIC_MODEL` (default `claude-sonnet-5`), `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`, `ANTHROPIC_TIMEOUT_MS` (default 60 000).
+- Env vars: `ANTHROPIC_API_KEY_DEV` / `ANTHROPIC_API_KEY_PROD` (one required to enable — selected by `NODE_ENV`, `production` uses the PROD key, everything else uses DEV; two separate console.anthropic.com keys so dev spend/rate limits never mix with prod), `ANTHROPIC_MODEL` (default `claude-sonnet-5`), `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`, `ANTHROPIC_TIMEOUT_MS` (default 60 000).
 - Every AI-powered bot must catch AI errors and continue with the deterministic result.
 
 ### 2.3 Orchestrator ✅ (`apps/api/src/lib/bot-dispatch.ts`)

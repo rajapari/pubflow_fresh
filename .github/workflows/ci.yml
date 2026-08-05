@@ -55,10 +55,10 @@ jobs:
           MINIO_ACCESS_KEY=pubflow_minio
           MINIO_SECRET_KEY=pubflow_minio_secret
           LANGUAGETOOL_URL=http://127.0.0.1:8082
-          ANTHROPIC_API_KEY=
           APP_URL=http://localhost:3000
           API_URL=http://localhost:3001
           ONLYOFFICE_JWT_SECRET=ci_only_placeholder_secret
+          ANTHROPIC_API_KEY_DEV=
           EOF
 
       # Reuses the same docker-compose.yml the app runs on locally — one
@@ -331,7 +331,7 @@ jobs:
             --set-string secrets.minioSecretKey="${{ secrets.PROD_MINIO_SECRET_KEY }}" \
             --set-string secrets.keycloakAdminPassword="${{ secrets.PROD_KEYCLOAK_ADMIN_PASSWORD }}" \
             --set-string secrets.onlyofficeJwtSecret="${{ secrets.PROD_ONLYOFFICE_JWT_SECRET }}" \
-            --set-string secrets.anthropicApiKey="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --set-string secrets.anthropicApiKey="${{ secrets.ANTHROPIC_API_KEY_PROD }}" \
             --set-string secrets.stripeSecretKey="${{ secrets.STRIPE_SECRET_KEY }}" \
             --set-string secrets.stripeWebhookSecret="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
             --set-string secrets.crossrefLoginId="${{ secrets.CROSSREF_LOGIN_ID }}" \

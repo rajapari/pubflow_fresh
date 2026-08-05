@@ -111,7 +111,9 @@ Repo Settings → Secrets and variables → Actions → **Secrets**:
 
 Optional (leave unset if you don't have them yet — the app runs fine without
 any of these, matching local dev's graceful-degradation pattern):
-`ANTHROPIC_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+`ANTHROPIC_API_KEY_PROD` (the production Anthropic key — kept separate from
+the dev key's `ANTHROPIC_API_KEY_DEV` so spend/rate limits never mix),
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
 `CROSSREF_LOGIN_ID`, `CROSSREF_LOGIN_PASSWORD`, `LULU_CLIENT_KEY`,
 `LULU_CLIENT_SECRET`, `PMC_FTP_USERNAME`, `PMC_FTP_PASSWORD`, `SENTRY_DSN`.
 

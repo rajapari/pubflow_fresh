@@ -7,13 +7,13 @@ import { prisma } from '../src/lib/prisma.js'
 import { createFixture, type Fixture } from './helpers.js'
 
 let fx: Fixture
-const KEY_BACKUP = process.env.ANTHROPIC_API_KEY
+const KEY_BACKUP = process.env.ANTHROPIC_API_KEY_DEV
 
 beforeAll(async () => { fx = await createFixture('editorial') })
 afterAll(async () => {
   await fx.cleanup()
-  if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY
-  else process.env.ANTHROPIC_API_KEY = KEY_BACKUP
+  if (KEY_BACKUP === undefined) delete process.env.ANTHROPIC_API_KEY_DEV
+  else process.env.ANTHROPIC_API_KEY_DEV = KEY_BACKUP
 })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -21,7 +21,7 @@ const run = (type: string) =>
   editorialProcessor({ data: { type, submissionId: fx.submissionId } } as Job)
 
 function stubAi(json: unknown) {
-  process.env.ANTHROPIC_API_KEY = 'test-key'
+  process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true, status: 200,
     json: async () => ({ content: [{ type: 'text', text: JSON.stringify(json) }] }),
@@ -30,7 +30,7 @@ function stubAi(json: unknown) {
 
 describe('screening', () => {
   it('without AI: skipped report persisted with reason', async () => {
-    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY_DEV
     const report = await run('SCREENING')
     expect(report).toMatchObject({ status: 'skipped' })
     const sub = await prisma.submission.findUniqueOrThrow({ where: { id: fx.submissionId } })
@@ -53,7 +53,7 @@ describe('screening', () => {
   })
 
   it('AI failure → error report persisted, job resolves', async () => {
-    process.env.ANTHROPIC_API_KEY = 'test-key'
+    process.env.ANTHROPIC_API_KEY_DEV = 'test-key'
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }),
     })))
@@ -64,7 +64,7 @@ describe('screening', () => {
 
 describe('rebuttal coverage', () => {
   it('skips when there are no submitted reviews', async () => {
-    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY_DEV
     const report = await run('REBUTTAL')
     expect(report).toMatchObject({ status: 'skipped' })
     expect(String((report as { reason: string }).reason)).toMatch(/No completed reviews/)
