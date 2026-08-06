@@ -48,15 +48,25 @@ export const publicationRouter = router({
 
   create: chiefEditorProcedure
     .input(z.object({
-      title:       z.string().min(1).max(500),
-      type:        z.enum(['JOURNAL', 'BOOK', 'BOOK_SERIES', 'PROCEEDINGS']),
-      issn:        z.string().optional(),
-      isbn:        z.string().optional(),
-      description: z.string().optional(),
+      title:          z.string().min(1).max(500),
+      type:           z.enum(['JOURNAL', 'BOOK', 'BOOK_SERIES', 'PROCEEDINGS']),
+      issn:           z.string().optional(),
+      isbn:           z.string().optional(),
+      description:    z.string().optional(),
+      // Article Processing Charge, in whole currency units (dollars, not
+      // cents) for a friendlier API surface — converted to cents for storage.
+      apcAmount:      z.number().min(0).optional(),
+      apcCurrency:    z.string().length(3).toLowerCase().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const { apcAmount, apcCurrency, ...rest } = input
       return ctx.prisma.publication.create({
-        data: { tenantId: ctx.user.tenantId, ...input },
+        data: {
+          tenantId: ctx.user.tenantId,
+          ...rest,
+          ...(apcAmount !== undefined ? { apcAmountCents: Math.round(apcAmount * 100) } : {}),
+          ...(apcCurrency ? { apcCurrency } : {}),
+        },
       })
     }),
 
@@ -69,14 +79,28 @@ export const publicationRouter = router({
       isbn:                 z.string().optional(),
       submissionGuidelines: z.string().max(20000).optional(),
       reviewerInstructions: z.string().max(20000).optional(),
+      // Article Processing Charge, in whole currency units — null explicitly
+      // clears the APC (no charge for this publication); undefined leaves it
+      // unchanged.
+      apcAmount:            z.number().min(0).nullable().optional(),
+      apcCurrency:          z.string().length(3).toLowerCase().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { id, ...data } = input
+      const { id, apcAmount, apcCurrency, ...data } = input
       const pub = await ctx.prisma.publication.findFirst({
         where: { id, tenantId: ctx.user.tenantId },
       })
       if (!pub) throw new TRPCError({ code: 'NOT_FOUND' })
-      return ctx.prisma.publication.update({ where: { id }, data })
+      return ctx.prisma.publication.update({
+        where: { id },
+        data: {
+          ...data,
+          ...(apcAmount !== undefined
+            ? { apcAmountCents: apcAmount === null ? null : Math.round(apcAmount * 100) }
+            : {}),
+          ...(apcCurrency ? { apcCurrency } : {}),
+        },
+      })
     }),
 
   archive: chiefEditorProcedure

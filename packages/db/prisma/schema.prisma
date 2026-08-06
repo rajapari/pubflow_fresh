@@ -351,6 +351,13 @@ model Publication {
   submissionGuidelines String?
   reviewerInstructions String?
   status               PublicationStatus @default(ACTIVE)
+  // Article Processing Charge. NULL/0 = no APC for this publication — the
+  // invoicing bot skips cleanly rather than billing $0. Cents avoids float
+  // rounding on money; currency is a free-form ISO 4217 lowercase code
+  // (Stripe's own convention) rather than an enum, since new currencies
+  // shouldn't need a migration.
+  apcAmountCents       Int?
+  apcCurrency          String            @default("usd")
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
@@ -419,6 +426,13 @@ model Submission {
   // SEO/Scholar meta tags) and archival-deposit record. Same report shape.
   promoKit         Json?
   archivalReport   Json?
+
+  // APC (Article Processing Charge) invoicing — same report shape as the
+  // other *Report fields. 'skipped' (no APC configured / Stripe not set
+  // up), 'invoiced' (Stripe Invoice sent, awaiting payment — Stripe itself
+  // owns collection reminders from here), 'paid'/'payment_failed'/'void'
+  // (mirrored from Stripe webhooks), or 'error'.
+  apcReport        Json?
 
   // Compliance: author-supplied ethics/funding/COI/data/licensing info,
   // checked by the Ethics, Data-Availability, and License bots (same report

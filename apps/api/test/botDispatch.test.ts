@@ -92,8 +92,20 @@ describe('dispatchStageBots', () => {
 
   it('statuses without bots are no-ops', async () => {
     await dispatchStageBots(prisma, queues, fx.submissionId, 'PEER_REVIEW')
-    await dispatchStageBots(prisma, queues, fx.submissionId, 'PUBLISHED')
     expect(await drainLatestJob(QUEUES.INTAKE)).toBeNull()
+  })
+
+  it('ACCEPTED enqueues an APC invoice job', async () => {
+    await dispatchStageBots(prisma, queues, fx.submissionId, 'ACCEPTED')
+    const job = await drainLatestJob(QUEUES.APC)
+    expect(job).not.toBeNull()
+    expect((job!.data as { type: string }).type).toBe('APC_INVOICE')
+  })
+
+  it('PUBLISHED enqueues promo-kit and archival jobs', async () => {
+    await dispatchStageBots(prisma, queues, fx.submissionId, 'PUBLISHED')
+    const job = await drainLatestJob(QUEUES.MARKETING)
+    expect(job).not.toBeNull()
   })
 
   it('never throws, even with a broken queue map', async () => {

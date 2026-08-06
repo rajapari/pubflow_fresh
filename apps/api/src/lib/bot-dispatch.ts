@@ -177,6 +177,13 @@ export async function dispatchStageBots(
         break
       }
 
+      // Accepted: bill the Article Processing Charge, if the publication has
+      // one configured — the bot itself checks and skips cleanly otherwise.
+      case 'ACCEPTED': {
+        await queues[QUEUES.APC].add('apc-invoice', { type: 'APC_INVOICE', submissionId })
+        break
+      }
+
       // Published: build the promotion kit (lay summary, social drafts, SEO
       // tags) and record archival-deposit status.
       case 'PUBLISHED': {

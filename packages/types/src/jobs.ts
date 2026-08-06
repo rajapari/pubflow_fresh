@@ -258,6 +258,13 @@ export const ComplianceJobSchema = z.discriminatedUnion('type', [
 ])
 export type ComplianceJob = z.infer<typeof ComplianceJobSchema>
 
+// ── APC (Article Processing Charge) invoicing ────────────
+export const ApcInvoiceJobSchema = z.object({
+  type: z.literal('APC_INVOICE'),
+  submissionId: z.string().uuid(),
+})
+export type ApcInvoiceJob = z.infer<typeof ApcInvoiceJobSchema>
+
 export const QUEUES = {
   PANDOC: 'pandoc',
   LATEX: 'latex',
@@ -276,5 +283,6 @@ export const QUEUES = {
   EDITORIAL: 'editorial',
   MARKETING: 'marketing',
   COMPLIANCE: 'compliance',
+  APC: 'apc',
 } as const
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES]

@@ -59,12 +59,16 @@ export default function PublicationDetailPage() {
 
   const [guidelines, setGuidelines] = React.useState('')
   const [reviewerInstr, setReviewerInstr] = React.useState('')
+  const [apcAmount, setApcAmount] = React.useState('')
+  const [apcCurrency, setApcCurrency] = React.useState('usd')
   const [guidelinesLoaded, setGuidelinesLoaded] = React.useState(false)
 
   React.useEffect(() => {
     if (pub && !guidelinesLoaded) {
       setGuidelines(pub.submissionGuidelines ?? '')
       setReviewerInstr(pub.reviewerInstructions ?? '')
+      setApcAmount(pub.apcAmountCents != null ? String(pub.apcAmountCents / 100) : '')
+      setApcCurrency(pub.apcCurrency ?? 'usd')
       setGuidelinesLoaded(true)
     }
   }, [pub, guidelinesLoaded])
@@ -119,6 +123,10 @@ export default function PublicationDetailPage() {
         id: publicationId,
         submissionGuidelines: guidelines || undefined,
         reviewerInstructions: reviewerInstr || undefined,
+        // '' means "clear the APC" (null), not "leave unchanged" (undefined)
+        // — matches the field's own toggle-off-by-clearing UX below.
+        apcAmount: apcAmount.trim() === '' || Number.isNaN(Number(apcAmount)) ? null : Number(apcAmount),
+        apcCurrency,
       })
       toast.success('Guidelines saved')
       pubQ.refetch()
@@ -423,6 +431,41 @@ export default function PublicationDetailPage() {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-brand-500 resize-y"
               />
               <p className="text-xs text-gray-400 text-right">{reviewerInstr.length} / 20,000 characters</p>
+            </div>
+
+            {/* Article Processing Charge */}
+            <div className="p-5 space-y-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Article Processing Charge (APC)</h2>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  When set, an author is automatically emailed a Stripe invoice for this amount the moment
+                  their submission is Accepted. Leave the amount empty for no APC (fully subscription-funded
+                  or no-fee journals).
+                </p>
+              </div>
+              <div className="flex items-end gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Amount</label>
+                  <input
+                    type="number" min="0" step="0.01" value={apcAmount}
+                    onChange={e => setApcAmount(e.target.value)}
+                    placeholder="e.g. 1500.00"
+                    className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Currency</label>
+                  <select
+                    value={apcCurrency}
+                    onChange={e => setApcCurrency(e.target.value)}
+                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    {['usd', 'eur', 'gbp', 'cad', 'aud'].map(c => (
+                      <option key={c} value={c}>{c.toUpperCase()}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 

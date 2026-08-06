@@ -278,8 +278,8 @@ Supported manuals ✅: APA 7, Chicago 17, AMA 11, MLA 9, Vancouver/ICMJE, IEEE, 
 | Bot | Status | Notes |
 |---|---|---|
 | **Billing router / Stripe** | ✅ | Existing |
-| **APC Invoice Bot** | 🔜 | Auto-invoice on ACCEPTED; waiver rules per tenant. |
-| **Dunning Bot** | 🔜 | Scheduler-pattern payment reminders. |
+| **APC Invoice Bot** | ✅ | `apcProcessor` (`processors/apc.ts`, APC job on the `apc` queue, auto-dispatched on ACCEPTED). Skips cleanly when the publication has no `apcAmountCents` configured or `STRIPE_SECRET_KEY` is unset. Find-or-creates a Stripe Customer for the author (by email — authors don't carry their own `stripeCustomerId`, that field is Tenant-level for subscription billing), then sends a `send_invoice`-collection-method Invoice (emailed payment link, no card-on-file required). Result → `Submission.apcReport`. Set the APC amount per publication: Publications → [journal] → Author Guidelines tab. |
+| **Dunning Bot** | N/A | Not built — Stripe's own invoice reminders (Dashboard → Settings → Billing → Invoicing) cover this for `send_invoice`-collection invoices; no separate scheduler-pattern bot needed. |
 
 ### Stage 16 — Marketing & Social
 

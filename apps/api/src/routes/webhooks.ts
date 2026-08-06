@@ -94,6 +94,41 @@ export async function webhookRoutes(app: FastifyInstance) {
           break
         }
 
+        // APC invoice lifecycle — apc.ts (worker) creates the invoice and
+        // stamps its metadata.submissionId; Stripe owns collection/reminders
+        // from there, we just mirror status back onto Submission.apcReport.
+        case 'invoice.paid':
+        case 'invoice.payment_failed':
+        case 'invoice.voided':
+        case 'invoice.marked_uncollectible': {
+          const invoice = event.data.object as Stripe.Invoice
+          const submissionId = invoice.metadata?.submissionId
+          if (!submissionId) break // not an APC invoice — nothing to mirror
+
+          const STATUS_MAP: Record<string, string> = {
+            'invoice.paid': 'paid',
+            'invoice.payment_failed': 'payment_failed',
+            'invoice.voided': 'void',
+            'invoice.marked_uncollectible': 'uncollectible',
+          }
+          const sub = await prisma.submission.findUnique({
+            where: { id: submissionId }, select: { apcReport: true },
+          })
+          const prevReport = (sub?.apcReport as Record<string, unknown> | null) ?? {}
+          await prisma.submission.update({
+            where: { id: submissionId },
+            data: {
+              apcReport: {
+                ...prevReport,
+                status: STATUS_MAP[event.type],
+                ...(event.type === 'invoice.paid' ? { paidAt: new Date().toISOString() } : {}),
+              } as any,
+            },
+          })
+          app.log.info(`[Webhook] APC invoice ${event.type} for submission ${submissionId}`)
+          break
+        }
+
         default:
           app.log.debug(`[Webhook] Unhandled event type: ${event.type}`)
       }

@@ -206,6 +206,44 @@ export default function SubmissionDetailPage() {
             <div className="text-sm text-gray-500">No decisions yet.</div>
           )}
         </div>
+
+        {sub.apcReport && (sub.apcReport as { status?: string }).status !== 'skipped' && (
+          <div className="bg-white rounded-lg p-6 shadow">
+            <h3 className="text-sm text-gray-600 mb-3">Article Processing Charge</h3>
+            {(() => {
+              const apc = sub.apcReport as {
+                status: string; amountCents?: number; currency?: string; hostedInvoiceUrl?: string
+              }
+              const APC_LABELS: Record<string, { label: string; color: string }> = {
+                invoiced:        { label: 'Invoiced — awaiting payment', color: 'amber' },
+                paid:            { label: 'Paid', color: 'green' },
+                payment_failed:  { label: 'Payment failed', color: 'red' },
+                void:            { label: 'Voided', color: 'gray' },
+                uncollectible:   { label: 'Uncollectible', color: 'red' },
+                error:           { label: 'Invoicing error', color: 'red' },
+              }
+              const info = APC_LABELS[apc.status] ?? { label: apc.status, color: 'gray' }
+              return (
+                <div className="space-y-2 text-sm">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-${info.color}-100 text-${info.color}-700`}>
+                    {info.label}
+                  </span>
+                  {apc.amountCents != null && apc.currency && (
+                    <p className="text-gray-600">
+                      {(apc.amountCents / 100).toFixed(2)} {apc.currency.toUpperCase()}
+                    </p>
+                  )}
+                  {apc.hostedInvoiceUrl && (
+                    <a href={apc.hostedInvoiceUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-brand-600 hover:underline text-xs">
+                      View Stripe invoice →
+                    </a>
+                  )}
+                </div>
+              )
+            })()}
+          </div>
+        )}
       </aside>
     </div>
   )
