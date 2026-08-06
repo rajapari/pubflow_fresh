@@ -18,6 +18,26 @@ send potential clients — at zero hosting cost, running on your own machine.
 
 ---
 
+## Quick start (do this)
+Once `cloudflared` is installed (Step 1, one-time) and the stack is running
+(Step 2):
+```
+pnpm demo
+```
+That's `scripts/start-demo.mjs` — it does everything in Steps 3–6 below
+(start 4 tunnels, write both env files, update Keycloak, start `pnpm dev:demo`)
+and prints the one URL to share. `Ctrl+C` stops everything cleanly (all 4
+tunnels + the app). Tested end-to-end, not just written and hoped for — see
+the script's own header comment for the two real bugs that surfaced from
+actually running it (a URL-parsing edge case and a backwards prerequisite
+check) and how they were fixed.
+
+Steps 3–7 below are what the script does for you, kept as the reference for
+what's actually happening / how to do it by hand if the script ever
+misbehaves.
+
+---
+
 ## Why this needs more than one tunnel
 
 PubFlow isn't one service — the *browser* talks directly to four of them:
