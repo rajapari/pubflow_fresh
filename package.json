@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "turbo dev",
+    "dev:demo": "turbo dev:demo",
     "build": "turbo build",
     "lint": "turbo lint",
     "test": "turbo test",

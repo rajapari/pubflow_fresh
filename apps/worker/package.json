@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file=../../.env src/worker.ts",
+    "dev:demo": "tsx watch --env-file=../../.env.demo src/worker.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/worker.js",
     "test": "vitest run"
