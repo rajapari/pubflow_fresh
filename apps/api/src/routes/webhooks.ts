@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import Stripe from 'stripe'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? 'sk_test_placeholder')
@@ -101,6 +102,114 @@ export async function webhookRoutes(app: FastifyInstance) {
       reply.status(500).send({ error: 'Webhook handler failed' })
       return
     }
+
+    reply.status(200).send({ received: true })
+  })
+
+  // Copyleaks completion callback. Unlike Stripe, Copyleaks doesn't sign its
+  // webhook payloads — the URL-embedded token (minted by
+  // apps/worker/src/processors/editorial.ts's runSimilarity, hashed before
+  // it's ever persisted) is the only authenticity check. Copyleaks
+  // substitutes the literal status word for the {STATUS} placeholder we
+  // gave it, so the URL shape is /webhooks/copyleaks/:submissionId/:token/:status.
+  app.post('/copyleaks/:submissionId/:token/:status', async (req, reply) => {
+    const { submissionId, token, status } = req.params as {
+      submissionId: string; token: string; status: string
+    }
+
+    const sub = await prisma.submission.findUnique({
+      where: { id: submissionId },
+      select: { similarityReport: true },
+    })
+    const report = sub?.similarityReport as Record<string, unknown> | null
+    const storedHash = report?.['tokenHash'] as string | undefined
+
+    // Constant-time compare so a mismatched token can't be brute-forced via
+    // response-timing differences; the length check must happen first since
+    // timingSafeEqual throws (not returns false) on length mismatch.
+    const suppliedHash = createHash('sha256').update(token).digest('hex')
+    const storedBuf = storedHash ? Buffer.from(storedHash) : null
+    const suppliedBuf = Buffer.from(suppliedHash)
+    const validToken = Boolean(storedBuf)
+      && storedBuf!.length === suppliedBuf.length
+      && timingSafeEqual(storedBuf!, suppliedBuf)
+
+    if (!validToken) {
+      app.log.warn(`[Webhook] Copyleaks: invalid token for submission ${submissionId}`)
+      reply.status(403).send({ error: 'Invalid token' })
+      return
+    }
+
+    // This plugin's JSON parser (registered above for Stripe's raw-body
+    // signature check) hands every route in this scope a Buffer, not a
+    // parsed object — parse it ourselves here.
+    let body: {
+      scanId?: string
+      results?: {
+        score?: {
+          aggregatedScore?: number
+          identicalWords?: number
+          minorChangedWords?: number
+          relatedMeaningWords?: number
+        }
+        database?: Array<{ title?: string; matchedWords?: string }>
+        batch?: Array<{ title?: string; matchedWords?: string }>
+        repositories?: Array<{ title?: string; matchedWords?: string }>
+        internet?: Array<{ title?: string; matchedWords?: string }>
+      }
+    }
+    try {
+      body = JSON.parse((req.body as Buffer).toString('utf-8'))
+    } catch {
+      body = {}
+    }
+
+    if (status === 'completed') {
+      const score = body.results?.score
+      const matches = [
+        ...(body.results?.internet ?? []),
+        ...(body.results?.database ?? []),
+        ...(body.results?.batch ?? []),
+        ...(body.results?.repositories ?? []),
+      ]
+        .slice(0, 50)
+        .map((m) => ({ title: m.title ?? null, matchedWords: m.matchedWords ?? null }))
+
+      await prisma.submission.update({
+        where: { id: submissionId },
+        data: {
+          similarityReport: {
+            status: 'done',
+            provider: 'copyleaks',
+            scanId: body.scanId ?? report?.['scanId'] ?? null,
+            score: {
+              aggregatedScore:     score?.aggregatedScore     ?? null,
+              identicalWords:      score?.identicalWords      ?? null,
+              minorChangedWords:   score?.minorChangedWords   ?? null,
+              relatedMeaningWords: score?.relatedMeaningWords ?? null,
+            },
+            matches,
+            ranAt: new Date().toISOString(),
+          } as any,
+        },
+      })
+      app.log.info(`[Webhook] Copyleaks scan completed for submission ${submissionId}`)
+    } else if (status === 'error') {
+      await prisma.submission.update({
+        where: { id: submissionId },
+        data: {
+          similarityReport: {
+            status: 'error',
+            provider: 'copyleaks',
+            error: JSON.stringify(body).slice(0, 2000),
+            ranAt: new Date().toISOString(),
+          } as any,
+        },
+      })
+      app.log.warn(`[Webhook] Copyleaks scan errored for submission ${submissionId}`)
+    }
+    // Other statuses (credits-checked, indexed, export-completed, …) are
+    // intermediate lifecycle events we don't act on yet — ack without change.
 
     reply.status(200).send({ received: true })
   })

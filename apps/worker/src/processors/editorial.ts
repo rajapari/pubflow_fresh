@@ -10,9 +10,12 @@
 // ({ status, ..., ranAt }); AI paths degrade to 'skipped' without a key.
 import type { Job } from 'bullmq'
 import type { Prisma } from '@pubflow/db'
+import { randomBytes, createHash } from 'node:crypto'
 import { EditorialJobSchema } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
 import { aiEnabled, aiJSON } from '../lib/ai.js'
+import { downloadFromMinio } from '../lib/storage.js'
+import { copyleaksEnabled, submitScan } from '../lib/copyleaks.js'
 
 type Report = Record<string, unknown>
 
@@ -152,23 +155,52 @@ async function runRebuttal(submissionId: string): Promise<Report> {
 // ── SIMILARITY (provider adapter) ────────────────────────
 
 async function runSimilarity(submissionId: string): Promise<Report> {
-  void submissionId
-  // Adapter seam: only Copyleaks is sketched; iThenticate/Crossref Similarity
+  // Adapter seam: only Copyleaks is wired; iThenticate/Crossref Similarity
   // Check slot in the same way. Without credentials the bot records exactly
   // why it did not run instead of failing the pipeline.
-  if (!process.env.COPYLEAKS_API_KEY) {
+  if (!copyleaksEnabled()) {
     return {
       status: 'skipped',
-      reason: 'No similarity provider configured (set COPYLEAKS_API_KEY)',
+      reason: 'No similarity provider configured (set COPYLEAKS_API_KEY and COPYLEAKS_EMAIL)',
       provider: null,
     }
   }
-  // Provider integration lands when credentials exist to test against —
-  // submitting author manuscripts to a third party untested is not acceptable.
-  return {
-    status: 'skipped',
-    reason: 'Copyleaks adapter present but provider integration not yet enabled',
-    provider: 'copyleaks',
+
+  const manuscript = await prisma.manuscript.findFirst({
+    where: { submissionId, isLatest: true },
+    orderBy: { uploadedAt: 'desc' },
+  })
+  if (!manuscript) {
+    return { status: 'skipped', reason: 'No manuscript uploaded yet', provider: 'copyleaks' }
+  }
+
+  // Copyleaks doesn't sign its webhook callbacks, so the URL-embedded token
+  // is the only thing standing between "genuine result" and "anyone who can
+  // guess the URL can fabricate a clean plagiarism report for their own
+  // submission." Only the SHA-256 hash is persisted — the raw token exists
+  // only in the URL handed to Copyleaks, never in a field authors/editors
+  // can read back through the app, so leaking similarityReport can't be
+  // used to forge a completion callback.
+  const token = randomBytes(24).toString('hex')
+  const tokenHash = createHash('sha256').update(token).digest('hex')
+  // Unique per submit attempt (not just per submission) so a resubmit after
+  // an earlier scan can't collide with the still-in-flight one.
+  const scanId = `${submissionId}-${Date.now()}`
+  const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
+  const webhookBaseUrl = `${apiUrl}/webhooks/copyleaks/${submissionId}/${token}`
+
+  try {
+    const content = await downloadFromMinio(manuscript.minioKey)
+    await submitScan({ scanId, content, format: manuscript.format, webhookBaseUrl })
+    return {
+      status: 'pending',
+      provider: 'copyleaks',
+      scanId,
+      tokenHash,
+      submittedAt: new Date().toISOString(),
+    }
+  } catch (err) {
+    return { status: 'error', provider: 'copyleaks', error: String(err) }
   }
 }
 

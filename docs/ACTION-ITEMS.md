@@ -5,10 +5,12 @@
 ## 1. ~~Activate the AI bots~~ — done (2026-08-06)
 Dev key (`pubflow-dev-worker`) live in local `.env` as `ANTHROPIC_API_KEY_DEV`, verified with a real API call. Prod key (`pubflow-prod-worker`) created — still needs the `ANTHROPIC_API_KEY_PROD` GitHub repo secret added (see item 5) before it's live in the cluster.
 
-## 2. Similarity provider (decision + signup)
-- Choose: Crossref Similarity Check / iThenticate (scholarly standard; needs Crossref membership) or Copyleaks (fast REST signup).
-- Obtain the API key, then request the live adapter build — the integration is intentionally unwritten until real credentials exist to test against (no untested transmission of author manuscripts to third parties).
-- Verify: resubmit → `similarityReport` carries a score + report URL.
+## 2. ~~Similarity provider~~ — done (2026-08-06)
+Chose Copyleaks. Live adapter built: `apps/worker/src/lib/copyleaks.ts` (login + submit) and the SIMILARITY job in `editorialProcessor` submit the latest manuscript on SUBMITTED. Results arrive asynchronously via `POST /webhooks/copyleaks/:submissionId/:token/:status` (`apps/api/src/routes/webhooks.ts`) — Copyleaks doesn't sign webhooks, so a per-scan token (only its SHA-256 hash is ever persisted) authenticates the callback instead. `similarityReport` goes `pending` → `done` (score + up to 50 matched sources) or `error`.
+
+Verified live: real `COPYLEAKS_API_KEY`/`COPYLEAKS_EMAIL` login + submit succeeded against the real API (sandbox mode, no credits spent). **Not yet verified**: the webhook delivery leg, since Copyleaks calls back to a publicly-reachable URL and local dev isn't reachable from the internet. To fully verify end-to-end: either (a) deploy to a real environment with a public `API_URL` and submit a real test manuscript, or (b) tunnel local dev (ngrok/Cloudflare Tunnel) temporarily and set `API_URL` to the tunnel URL before submitting. Set `COPYLEAKS_SANDBOX=true` for that first test — synthetic results, no real credits or actual similarity detection, still exercises the full webhook round-trip.
+
+Scope note: `similarityReport` carries a numeric score + matched-source titles, not a shareable report URL — Copyleaks' completion webhook doesn't include one; generating a downloadable/viewable report is a separate async "export" API call. Skipped for v1 since the score + matches already give an editor enough to act on; revisit if a linkable report becomes a real need.
 
 ## 3. Archival & indexing memberships (weeks of lead time — start early)
 | Target | Action | Env var |
