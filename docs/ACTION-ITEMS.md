@@ -2,12 +2,8 @@
 
 **As of 2026-07-19.** Phases A–D of the bot pipeline are built, tested (worker 101 / api 33 / python 42), and green in CI. Everything below is what only the **owner** can do: credentials, memberships, and decisions. Ordered by impact.
 
-## 1. Activate the AI bots (~15 min)
-All AI bots (intake vision, AI copyedit, screening, rebuttal coverage, reviewer re-rank, decision letters, alt-text, promo kit) currently write `status: "skipped"` reports.
-1. Create two keys at console.anthropic.com (set spend limits on both) — one per environment, e.g. `pubflow-dev-worker` and `pubflow-prod-worker`, so dev usage never shares a budget/rate limit with prod. Selected automatically by `NODE_ENV` (`apps/api/src/lib/ai.ts` / `apps/worker/src/lib/ai.ts`).
-2. Dev: `ANTHROPIC_API_KEY_DEV=...` in root `.env`; restart the worker.
-3. Prod: GitHub repo secret `ANTHROPIC_API_KEY_PROD` (Helm already injects it as `ANTHROPIC_API_KEY_PROD`, read only when `NODE_ENV=production`).
-4. Verify: submit a test manuscript → `Submission.screeningReport.status === "done"`.
+## 1. ~~Activate the AI bots~~ — done (2026-08-06)
+Dev key (`pubflow-dev-worker`) live in local `.env` as `ANTHROPIC_API_KEY_DEV`, verified with a real API call. Prod key (`pubflow-prod-worker`) created — still needs the `ANTHROPIC_API_KEY_PROD` GitHub repo secret added (see item 5) before it's live in the cluster.
 
 ## 2. Similarity provider (decision + signup)
 - Choose: Crossref Similarity Check / iThenticate (scholarly standard; needs Crossref membership) or Copyleaks (fast REST signup).
