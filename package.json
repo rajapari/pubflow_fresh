@@ -15,6 +15,7 @@
     "db:seed": "pnpm --filter @pubflow/db db:seed",
     "db:studio": "pnpm --filter @pubflow/db db:studio",
     "test:users": "node scripts/create-test-users.js",
+    "demo": "node scripts/start-demo.mjs",
     "docker:dev": "docker compose --env-file .env -f infra/docker/docker-compose.yml up -d",
     "docker:dev:full": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools --profile design --profile search up -d",
     "docker:dev:tools": "docker compose --env-file .env -f infra/docker/docker-compose.yml --profile tools up -d",
