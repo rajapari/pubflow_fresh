@@ -8,8 +8,6 @@ import { PrismaClient } from '@pubflow/db'
 
 const KEYCLOAK_URL = process.env.KEYCLOAK_URL || 'http://localhost:8080'
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || 'pubflow'
-const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID || 'pubflow-api'
-const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET || 'CHANGE_ME_KEYCLOAK'
 const KEYCLOAK_ADMIN = 'admin'
 const KEYCLOAK_ADMIN_PASSWORD = process.env.KEYCLOAK_ADMIN_PASSWORD || 'Admin@PubFlow2025'
 
@@ -27,13 +25,18 @@ const TEST_USERS = [
 
 async function getAdminToken() {
   console.log('🔑 Getting admin token from Keycloak...')
-  const response = await fetch(`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token`, {
+  // The Admin REST API (used below to create users in the pubflow realm)
+  // requires a token from Keycloak's bootstrap superuser, who only exists in
+  // the master realm via the public admin-cli client — not a user in the
+  // pubflow realm itself (there isn't one), and not the confidential
+  // pubflow-api client (that's for the app's own service account, unrelated
+  // to realm administration).
+  const response = await fetch(`${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'password',
-      client_id: KEYCLOAK_CLIENT_ID,
-      client_secret: KEYCLOAK_CLIENT_SECRET,
+      client_id: 'admin-cli',
       username: KEYCLOAK_ADMIN,
       password: KEYCLOAK_ADMIN_PASSWORD,
     }),
