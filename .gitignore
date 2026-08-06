@@ -7,6 +7,12 @@ build
 .env
 .env.local
 .env.*.local
+# Any other .env.* variant (e.g. .env.demo for the staging-environment-setup.md
+# workflow) — these hold the same real secrets as .env, just with different
+# public URLs, and must never be committed. .env.example is the one
+# intentional exception (docs/placeholders only, no real credentials).
+.env.*
+!.env.example
 packages/db/generated
 *.log
 .DS_Store

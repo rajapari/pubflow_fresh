@@ -46,5 +46,8 @@ Per-target adapters activate/finish once each credential is handed over.
 2. ~~Compliance bots~~ — done (2026-07-21): ethics/funding/COI plausibility, data-availability link validation, license/copyright completeness gate, all auto-run on SUBMITTED. See `docs/bots-architecture.md`.
 3. **Social auto-posting** — currently drafts-only by design; requires platform API credentials + explicit approval.
 
+## 8. Editorial setup + free staging/demo environment — in progress (started 2026-08-06)
+Doing items 6.1–6.4 (StyleProfile, IDML template porting, reviewer affiliations, AI-draft review practice) alongside setting up a free, browser-reachable test/demo environment on your own machine (Cloudflare Tunnel — no hosting cost, no cloud account needed to start). Full step-by-step plan, honest tradeoffs (your machine must stay on; tunnel URLs regenerate on restart), and the zero-cost upgrade path (Oracle Cloud Always Free) if you outgrow it: **`docs/staging-environment-setup.md`**.
+
 ## Known untested paths (need services/creds not present in dev)
 DOCX text extraction via the pandoc container; AI-live behavior (all AI tests use stubs); Scribus composition end-to-end; live similarity/archival providers.
