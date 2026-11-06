@@ -38,7 +38,12 @@ services:
 
   # ── DATA ───────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    # mirror.gcr.io, not Docker Hub directly: shared CI runner IPs (and some
+    # home networks) regularly exhaust Docker Hub's anonymous pull quota.
+    # Same fix already used for moby/buildkit in .github/workflows/ci.yml;
+    # applied here to postgres/redis/languagetool too (minio needs a
+    # different fix below — mirror.gcr.io doesn't carry it).
+    image: mirror.gcr.io/library/postgres:16-alpine
     container_name: pubflow_postgres
     environment:
       POSTGRES_USER: pubflow
@@ -61,7 +66,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
+    image: mirror.gcr.io/library/redis:7-alpine
     container_name: pubflow_redis
     command: redis-server --appendonly yes
     volumes:
@@ -77,7 +82,20 @@ services:
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
+    # minio/minio no longer exists on Docker Hub at all (MinIO pulled it —
+    # confirmed via Docker Hub's own repository API returning "not found",
+    # not a rate limit) and quay.io/minio/minio now refuses anonymous pulls
+    # too (as of Sept 2026 — MinIO restricted container distribution).
+    # mirror.gcr.io/minio/minio also 404s — Google's mirror doesn't carry it.
+    # Chainguard's free-tier build is the verified-working replacement
+    # (confirmed live: boots, formats storage, passes /minio/health/live).
+    # It runs as a non-root UID (65532) by default, which can't write to a
+    # freshly-created named volume owned by root — `user: root` fixes that;
+    # it's a local dev/CI data store, not a hardened boundary, so this is a
+    # reasonable trade. Re-verify this image reference periodically — it's
+    # a third-party mirror of an upstream MinIO no longer distributes itself.
+    image: cgr.dev/chainguard/minio:latest
+    user: root
     container_name: pubflow_minio
     command: server /data --console-address ":9001"
     environment:
@@ -231,7 +249,7 @@ services:
   # Only needed by the copyedit style bot (grammar/style suggestions).
   # Measured ~97% CPU sustained even at idle (JVM) — opt-in (`--profile tools`).
   languagetool:
-    image: erikvl87/languagetool:latest
+    image: mirror.gcr.io/erikvl87/languagetool:latest
     container_name: pubflow_languagetool
     profiles: [tools]
     ports:
