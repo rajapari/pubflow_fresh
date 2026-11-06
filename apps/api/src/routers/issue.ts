@@ -5,6 +5,7 @@ import { QUEUES } from '@pubflow/types'
 import { depositToCrossRef, type CrossRefArticle } from '../lib/crossref.js'
 import { depositToPubMed } from '../lib/pubmed.js'
 import { submitToLulu } from '../lib/printod.js'
+import { dispatchStageBots } from '../lib/bot-dispatch.js'
 
 export const issueRouter = router({
   // ── Issue Assembler (Stage 12) ─────────────────────────
@@ -262,6 +263,15 @@ export const issueRouter = router({
           })
         ),
       ])
+
+      // Orchestrator contract: every transition-performing mutation dispatches
+      // stage bots for the target status (was missing here — gap fix; bulk
+      // issue-publish is the only real UI path to PUBLISHED, so this used to
+      // mean the promo-kit bot and the archival-deposit seam never ran for
+      // any article actually published through the product).
+      await Promise.all(
+        publishable.map(sub => dispatchStageBots(prisma, queues, sub.id, 'PUBLISHED')),
+      )
 
       // Queue PUBLISHED notifications for each author
       await Promise.all(

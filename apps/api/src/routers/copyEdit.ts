@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { router, protectedProcedure, editorProcedure } from '../trpc/procedures.js'
 import { QUEUES } from '@pubflow/types'
 import { MinioStorage } from '../plugins/minio.js'
-import { dispatchCopyEditStyleBot } from '../lib/bot-dispatch.js'
+import { dispatchCopyEditStyleBot, dispatchStageBots } from '../lib/bot-dispatch.js'
 
 const COPY_EDITOR_ROLES = ['EDITOR_IN_CHIEF', 'SECTION_EDITOR', 'COPY_EDITOR'] as const
 
@@ -328,7 +328,7 @@ export const copyEditRouter = router({
   approve: editorProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { user, prisma } = ctx
+      const { user, prisma, queues } = ctx
       const ce = await prisma.copyEdit.findUnique({
         where: { id: input.id },
         include: { submission: true },
@@ -356,6 +356,12 @@ export const copyEditRouter = router({
           },
         }),
       ])
+
+      // Orchestrator contract: every transition-performing mutation dispatches
+      // stage bots for the target status (was missing here — gap fix; this
+      // transition used to silently skip Image QA, the alt-text bot, and the
+      // ARTWORK_EDITOR notification that bot-dispatch.ts wires to ARTWORK_PROCESSING).
+      await dispatchStageBots(prisma, queues, ce.submissionId, 'ARTWORK_PROCESSING')
 
       return { success: true }
     }),
