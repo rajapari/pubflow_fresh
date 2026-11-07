@@ -1,6 +1,17 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../generated/client"
+  provider      = "prisma-client-js"
+  output        = "../generated/client"
+  // "native" covers wherever `prisma generate` actually runs (Windows/dev,
+  // Ubuntu CI runners); linux-musl-openssl-3.0.x is added explicitly for
+  // the apps/api and apps/worker Docker images (node:22-alpine). Without it,
+  // Prisma can't detect the right musl+OpenSSL engine variant to download
+  // and silently defaults to the (wrong, no-longer-available-on-this-base)
+  // openssl-1.1.x build — confirmed live: the container booted, but every
+  // real query failed with "Error loading shared library libssl.so.1.1: No
+  // such file or directory". The Dockerfiles also install openssl3 itself
+  // (musl engines still dynamically link it; this only fixes which engine
+  // binary gets bundled, not whether the library exists on the image).
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {

@@ -1,4 +1,7 @@
 FROM node:22-alpine AS base
+# See apps/api/Dockerfile's identical line for why — same Prisma client,
+# same musl+OpenSSL engine requirement.
+RUN apk add --no-cache openssl
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /app
 
