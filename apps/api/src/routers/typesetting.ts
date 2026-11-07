@@ -129,9 +129,16 @@ export const typeSettingRouter = router({
         inputMinioKey: sub.manuscripts[0].minioKey,
       }
 
+      // No PDF_PRINT/PDF_WEB entry on purpose: pandoc's own PDF path shells
+      // out to pdflatex by default, and services/pandoc's image never
+      // installs a TeX engine (confirmed live — every PDF request through
+      // it 500s with "pdflatex not found"). The LATEX engine exists
+      // specifically for PDF output (full TeX Live, see docker-compose.yml's
+      // resource comment) — the branch below already rejects an
+      // engine/format combination Pandoc can't do with a clear BAD_REQUEST;
+      // leaving PDF_PRINT/PDF_WEB out of this map is what makes that branch
+      // actually fire for them instead of silently mapping to a broken path.
       const PANDOC_FORMAT: Record<string, string> = {
-        PDF_PRINT: 'pdf',
-        PDF_WEB:   'pdf',
         EPUB:      'epub',
         HTML:      'html',
         JATS_XML:  'jats',

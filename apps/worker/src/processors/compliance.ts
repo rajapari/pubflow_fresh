@@ -172,6 +172,16 @@ async function save(
 
 export async function complianceProcessor(job: Job) {
   const d = ComplianceJobSchema.parse(job.data)
+
+  // See editorialProcessor's identical guard for why: jobs can outlive
+  // their submission, and this turns that into a clean skip instead of a
+  // Prisma P2025 stack trace that reads like a real failure.
+  const exists = await prisma.submission.findUnique({ where: { id: d.submissionId }, select: { id: true } })
+  if (!exists) {
+    console.log(`[compliance] Skipping ${d.type} — submission ${d.submissionId} no longer exists`)
+    return { skipped: true, reason: 'submission not found' }
+  }
+
   switch (d.type) {
     case 'ETHICS':
       return save(d.submissionId, 'complianceReport', await runEthics(d.submissionId), 'Ethics & compliance check')

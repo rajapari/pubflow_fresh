@@ -208,6 +208,20 @@ async function runSimilarity(submissionId: string): Promise<Report> {
 
 export async function editorialProcessor(job: Job) {
   const d = EditorialJobSchema.parse(job.data)
+
+  // Jobs can outlive their submission — a deleted draft, a queue backlog
+  // surviving a database reset (observed live: leftover jobs from a prior
+  // session replaying against a reset DB). Skip quietly instead of letting
+  // every run* function below throw Prisma's raw P2025 part-way through,
+  // which BullMQ then logs as a failed job with a four-line stack trace
+  // that reads like a real bug. Harmless either way; this just makes the
+  // log say what's actually happening.
+  const exists = await prisma.submission.findUnique({ where: { id: d.submissionId }, select: { id: true } })
+  if (!exists) {
+    console.log(`[editorial] Skipping ${d.type} — submission ${d.submissionId} no longer exists`)
+    return { skipped: true, reason: 'submission not found' }
+  }
+
   switch (d.type) {
     case 'SCREENING':
       return saveReport(d.submissionId, 'screeningReport',
