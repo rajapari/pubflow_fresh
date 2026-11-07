@@ -503,10 +503,19 @@ async function main() {
   })
 
   // ═══ 11. INFRA / HEALTH ═══
-  await test('infra: /health reports postgres + redis ok', async () => {
+  await test('infra: /health reports postgres + redis + keycloak ok (200, not just the body)', async () => {
     const res = await fetch(`${API}/health`)
     const body = await res.json()
-    expect('infra: health ok', body.status === 'ok' && body.services?.postgres === 'ok' && body.services?.redis === 'ok', JSON.stringify(body))
+    expect('infra: health ok',
+      res.status === 200 && body.status === 'ok' &&
+      body.services?.postgres === 'ok' && body.services?.redis === 'ok' && body.services?.keycloak === 'ok',
+      `status=${res.status} ${JSON.stringify(body)}`)
+  })
+
+  await test('infra: /health/live answers without checking any dependency', async () => {
+    const res = await fetch(`${API}/health/live`)
+    const body = await res.json()
+    expect('infra: liveness ok', res.status === 200 && body.status === 'ok', `status=${res.status} ${JSON.stringify(body)}`)
   })
 
   // ── helper used above, defined after main() is declared so it's hoisted into scope ──

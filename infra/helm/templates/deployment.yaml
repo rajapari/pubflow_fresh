@@ -26,12 +26,20 @@ spec:
           envFrom:
             - configMapRef: { name: pubflow-config }
             - secretRef:    { name: pubflow-secrets }
+          # Readiness: the full dependency check (postgres/redis/Keycloak) —
+          # this now actually returns 503 when degraded (it used to always
+          # return 200 regardless of body content, so this probe could never
+          # detect anything, including a Keycloak outage leaving the pod
+          # 401ing every request). Keeping readiness on the full check and
+          # liveness on the shallow one (below) means a Keycloak/DB outage
+          # takes pods out of rotation without restarting them — restarting
+          # wouldn't help and would just thrash the cluster.
           readinessProbe:
             httpGet: { path: /health, port: {{ .Values.api.port }} }
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /health, port: {{ .Values.api.port }} }
+            httpGet: { path: /health/live, port: {{ .Values.api.port }} }
             initialDelaySeconds: 30
             periodSeconds: 30
           resources:

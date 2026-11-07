@@ -1,6 +1,5 @@
 import fp from 'fastify-plugin'
 import jwtPlugin from '@fastify/jwt'
-import { randomBytes } from 'node:crypto'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { AuthUser } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
@@ -20,6 +19,19 @@ declare module 'fastify' {
   }
 }
 
+// Module-level: fetched once Keycloak answers, then read fresh on every
+// verification by the async key fetcher registered below. This is what
+// lets auth self-heal if Keycloak was still booting when the API started —
+// a real scenario (Keycloak is typically the slowest thing to come up,
+// both in `docker compose up` and on a cluster's first deploy) — without
+// needing the API restarted once Keycloak finally answers.
+let currentPublicKey: string | null = null
+
+/** For the /health route — a 401-everything auth state is a real outage. */
+export function isKeycloakAuthHealthy(): boolean {
+  return currentPublicKey !== null
+}
+
 async function fetchPublicKey(logger: FastifyInstance['log']): Promise<string | null> {
   const url = `${process.env.KEYCLOAK_URL ?? 'http://localhost:8080'}/realms/${process.env.KEYCLOAK_REALM ?? 'pubflow'}`
   try {
@@ -27,7 +39,6 @@ async function fetchPublicKey(logger: FastifyInstance['log']): Promise<string | 
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json() as { public_key?: string }
     if (!data.public_key) throw new Error('No public_key')
-    logger.info('✅ Keycloak public key loaded')
     return `-----BEGIN PUBLIC KEY-----\n${data.public_key}\n-----END PUBLIC KEY-----`
   } catch (err) {
     logger.warn(`⚠️  Keycloak unavailable: ${err instanceof Error ? err.message : err}`)
@@ -35,19 +46,46 @@ async function fetchPublicKey(logger: FastifyInstance['log']): Promise<string | 
   }
 }
 
+const BACKGROUND_RETRY_MS = 10_000
+
+// Keeps trying forever, in the background, once the startup burst below
+// gives up — this is the self-healing half of the fix. Every request still
+// 401s (fail-closed, never an insecure fallback) until one of these succeeds.
+function retryInBackground(logger: FastifyInstance['log']): void {
+  const timer = setTimeout(() => {
+    void fetchPublicKey(logger).then((key) => {
+      if (key) {
+        currentPublicKey = key
+        logger.info('✅ Keycloak public key recovered — auth is live again, no restart needed')
+        return
+      }
+      retryInBackground(logger)
+    })
+  }, BACKGROUND_RETRY_MS)
+  // Never block process exit on this (tests, graceful shutdown) — it's a
+  // best-effort background retry, not something anything waits on.
+  timer.unref()
+}
+
 // Retry up to 4 times with a 2 s back-off so the API starts correctly even
 // when Keycloak is still booting alongside it (common in `docker compose up`).
-async function fetchPublicKeyWithRetry(logger: FastifyInstance['log']): Promise<string | null> {
+// If that burst isn't enough, hand off to the indefinite background retry
+// above instead of giving up — see retryInBackground's comment.
+async function establishPublicKey(logger: FastifyInstance['log']): Promise<void> {
   for (let attempt = 1; attempt <= 4; attempt++) {
     const key = await fetchPublicKey(logger)
-    if (key) return key
+    if (key) {
+      currentPublicKey = key
+      logger.info('✅ Keycloak public key loaded')
+      return
+    }
     if (attempt < 4) {
       logger.info(`Waiting for Keycloak… retry ${attempt}/3 in 2 s`)
       await new Promise(r => setTimeout(r, 2000))
     }
   }
-  logger.warn('⚠️  Could not reach Keycloak after 4 attempts — JWT verification disabled (dev mode). Restart the API once Keycloak is up.')
-  return null
+  logger.error('⚠️  Could not reach Keycloak after 4 attempts — auth is running FAIL-CLOSED (every request will be 401). Retrying in the background every 10s; no restart needed once Keycloak answers.')
+  retryInBackground(logger)
 }
 
 // Tenants confirmed to have publications — lets us skip the lazy-seed COUNT
@@ -55,22 +93,24 @@ async function fetchPublicKeyWithRetry(logger: FastifyInstance['log']): Promise<
 const seededTenants = new Set<string>()
 
 export const authPlugin = fp(async (app: FastifyInstance) => {
-  const publicKey = await fetchPublicKeyWithRetry(app.log)
+  await establishPublicKey(app.log)
 
-  // Fail CLOSED, never open: if Keycloak's public key can't be obtained, do
-  // NOT fall back to a fixed/known secret — that would let anyone who reads
-  // this source forge an HS256 token and authenticate as any user. Instead
-  // configure the JWT plugin with a random, process-local secret that nobody
-  // can know or derive, so every verification attempt fails and `authenticate`
-  // uniformly returns 401 until the API is restarted with Keycloak reachable.
-  const publicKeyUnavailable = !publicKey
-  await app.register(jwtPlugin, publicKey
-    ? { secret: { public: publicKey }, decode: { complete: true }, verify: { algorithms: ['RS256'] } }
-    : { secret: randomBytes(48).toString('hex'), verify: { algorithms: ['HS256'] } }
-  )
-  if (publicKeyUnavailable) {
-    app.log.error('⚠️  Keycloak public key unavailable — auth is running FAIL-CLOSED (every request will be 401) until the API is restarted with Keycloak reachable.')
-  }
+  // Fail CLOSED, never open: the key is read fresh on every verification via
+  // this async fetcher (fast-jwt's KeyFetcher form) instead of being baked
+  // into the plugin config once at registration time — so a Keycloak outage
+  // (at startup or later) simply makes verification throw (401, same as a
+  // bad signature), with no separate "no key yet" branch and no insecure
+  // fallback secret to maintain.
+  await app.register(jwtPlugin, {
+    secret: {
+      public: async () => {
+        if (!currentPublicKey) throw new Error('Keycloak public key unavailable')
+        return currentPublicKey
+      },
+    },
+    decode: { complete: true },
+    verify: { algorithms: ['RS256'] },
+  })
 
   app.decorate('authenticate', async (req: FastifyRequest) => {
     try {
