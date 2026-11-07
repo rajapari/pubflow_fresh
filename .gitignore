@@ -23,3 +23,7 @@ infra/docker/.volumes
 __pycache__/
 *.tsbuildinfo
 /backups/
+test-results
+playwright-report
+blob-report
+e2e/.cache
