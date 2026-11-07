@@ -38,6 +38,7 @@ data:
   SMTP_HOST: {{ .Values.config.smtpHost | quote }}
   SMTP_PORT: {{ .Values.config.smtpPort | quote }}
   SMTP_FROM: {{ .Values.config.smtpFrom | quote }}
+  SMTP_SECURE: {{ .Values.config.smtpSecure | quote }}
 
   CROSSREF_TEST_MODE: {{ .Values.config.crossrefTestMode | quote }}
   CROSSREF_DEPOSITOR_EMAIL: {{ .Values.config.crossrefDepositorEmail | quote }}
@@ -50,4 +51,5 @@ data:
   PREFLIGHT_SERVICE_URL: {{ .Values.config.preflightServiceUrl | quote }}
   IMAGE_SERVICE_URL: {{ .Values.config.imageServiceUrl | quote }}
   IDML_SERVICE_URL: {{ .Values.config.idmlServiceUrl | quote }}
+  XMLVALIDATE_SERVICE_URL: {{ .Values.config.xmlvalidateServiceUrl | quote }}
   LANGUAGETOOL_URL: {{ .Values.config.languagetoolUrl | quote }}

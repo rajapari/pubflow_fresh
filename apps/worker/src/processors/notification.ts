@@ -3,10 +3,19 @@ import nodemailer from 'nodemailer'
 import { NotificationJobSchema } from '@pubflow/types'
 import { prisma } from '../lib/prisma.js'
 
+// SMTP_USER/SMTP_PASSWORD are optional — Mailpit (local dev/CI) takes none.
+// Every real-world relay (SES, Postmark, SendGrid, etc.) requires both; this
+// previously had no `auth` field at all, so production email silently never
+// worked. SMTP_SECURE matches the usual port convention (587 = STARTTLS,
+// upgraded automatically; 465 = implicit TLS) but is still explicit rather
+// than inferred from the port, since relays vary.
+const smtpUser = process.env.SMTP_USER
+const smtpPass = process.env.SMTP_PASSWORD
 const transport = nodemailer.createTransport({
   host: process.env.SMTP_HOST ?? 'mailpit',
   port: Number(process.env.SMTP_PORT ?? 1025),
-  secure: false,
+  secure: process.env.SMTP_SECURE === 'true',
+  ...(smtpUser && smtpPass ? { auth: { user: smtpUser, pass: smtpPass } } : {}),
 })
 
 const APP = process.env.APP_URL ?? 'http://localhost:3000'

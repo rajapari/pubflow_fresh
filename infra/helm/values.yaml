@@ -71,6 +71,17 @@ microservices:
     port: 4100
     dockerfile: Dockerfile
     resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
+  # Missing entirely until now — CI's build-microservices job already builds
+  # ghcr.io/<owner>/pubflow/xmlvalidate (matrix entry in ci.yml), but with no
+  # Deployment/Service here and no XMLVALIDATE_SERVICE_URL in configmap.yaml,
+  # apps/worker/src/processors/xmlvalidate.ts fell back to its
+  # `http://localhost:4300` default — unreachable from the worker pod's own
+  # network namespace in Kubernetes, so every JATS/epubcheck validation job
+  # (chained from the pandoc processor) would fail in production.
+  xmlvalidate:
+    port: 4300
+    dockerfile: Dockerfile
+    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 512Mi } }
 
 # Copyedit grammar bot (Phase 3). Pre-built image (not something CI builds),
 # and JVM-based — this is the one flagged throughout this project's history
@@ -133,12 +144,13 @@ config:
   smtpHost: "smtp.pubflow.io"
   smtpPort: "587"
   smtpFrom: "noreply@pubflow.io"
-  # NOTE: the notification worker (apps/worker/src/processors/notification.ts)
-  # currently has no SMTP_USER/SMTP_PASSWORD support at all — only host/port/
-  # from. Most production SMTP relays (SendGrid, Postmark, SES) require auth.
-  # This is a real gap, out of scope for the k8s build-out itself — flagged
-  # here so it isn't lost. Mailpit (local dev) doesn't need auth, which is
-  # presumably why this was never needed before now.
+  # SMTP_SECURE: "false" for port 587 (STARTTLS, upgraded automatically by
+  # nodemailer) — set "true" instead if your relay uses port 465 (implicit
+  # TLS). SMTP_USER/SMTP_PASSWORD live in secrets.smtpUser/smtpPassword
+  # (secret.yaml) — real relays (SES/Postmark/SendGrid/...) require both;
+  # notification.ts used to have no `auth` field at all, so production email
+  # silently never went out.
+  smtpSecure: "false"
 
   # ── Crossref DOI registration ──────────────────────────
   # Defaults to test mode until you've verified real deposits work — flip to
@@ -159,6 +171,7 @@ config:
   preflightServiceUrl: "http://pubflow-preflight.pubflow.svc.cluster.local:4200"
   imageServiceUrl: "http://pubflow-image.pubflow.svc.cluster.local:5002"
   idmlServiceUrl: "http://pubflow-idml.pubflow.svc.cluster.local:4100"
+  xmlvalidateServiceUrl: "http://pubflow-xmlvalidate.pubflow.svc.cluster.local:4300"
 
   # ── Copyedit grammar bot (Phase 3) ───────────────────────────────────────
   # Degrades gracefully when unreachable (copyedit.ts already handles LT

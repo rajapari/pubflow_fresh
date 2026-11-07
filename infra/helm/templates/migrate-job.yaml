@@ -1,0 +1,36 @@
+# Runs `prisma migrate deploy` against the real database before every
+# install/upgrade — neither the API image's CMD nor any other chart
+# resource ever did this, so a fresh deploy would boot every pod against
+# an empty schema. Reuses the api image unchanged (verified locally: it
+# already carries packages/db's migrations/ directory and the prisma CLI
+# from the Docker build's `COPY . .`, confirmed by actually running
+# `pnpm db:migrate` inside the built image against a real Postgres).
+#
+# Helm hook, not a plain Job: pre-install/pre-upgrade means this runs and
+# must succeed (hook-failure-policy) BEFORE Helm touches the Deployments
+# below, so a migration failure blocks the rollout instead of racing it —
+# the exact failure mode flagged (pods coming up against a schema that
+# isn't there yet).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pubflow-db-migrate
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      name: pubflow-db-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.global.imageRegistry }}/{{ .Values.api.image }}:{{ .Values.global.imageTag }}"
+          command: ["pnpm", "--filter", "@pubflow/db", "db:migrate"]
+          workingDir: /app
+          envFrom:
+            - secretRef: { name: pubflow-secrets }
