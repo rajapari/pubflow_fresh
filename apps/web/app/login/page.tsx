@@ -11,23 +11,43 @@ import { saveAuthToken, saveRefreshToken } from '@/lib/auth'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [email,       setEmail]       = useState('')
-  const [password,    setPassword]    = useState('')
-  const [showPw,      setShowPw]      = useState(false)
-  const [isLoading,   setIsLoading]   = useState(false)
+  const [email,         setEmail]         = useState('')
+  const [password,      setPassword]      = useState('')
+  const [showPw,        setShowPw]        = useState(false)
+  // Separate state per button: they used to share one `isLoading`, so
+  // clicking SSO (which never resets it — see below) left the *email
+  // form's* submit button stuck reading "Signing in…" and disabled, not
+  // the SSO button the user actually clicked.
+  const [isOAuthLoading, setIsOAuthLoading] = useState(false)
+  const [isEmailLoading, setIsEmailLoading] = useState(false)
 
   const handleOAuthLogin = () => {
-    setIsLoading(true)
-    const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL    || 'http://localhost:8080'
-    const realm       = process.env.NEXT_PUBLIC_KEYCLOAK_REALM  || 'pubflow'
-    const clientId    = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
-    const redirectUri = `${window.location.origin}/auth/callback`
-    window.location.href = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&response_mode=query&scope=openid`
+    setIsOAuthLoading(true)
+    try {
+      const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL    || 'http://localhost:8080'
+      const realm       = process.env.NEXT_PUBLIC_KEYCLOAK_REALM  || 'pubflow'
+      const clientId    = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
+      const redirectUri = `${window.location.origin}/auth/callback`
+      window.location.href = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&response_mode=query&scope=openid`
+    } catch {
+      setIsOAuthLoading(false)
+      toast.error('Could not start sign-in. Please try again.')
+      return
+    }
+    // A successful redirect navigates away and unmounts this page, so
+    // nothing below normally runs. If it's still here after a few
+    // seconds, the navigation never actually happened (Keycloak
+    // unreachable, a blocked redirect, etc.) — surface that instead of
+    // leaving the button disabled with no way out.
+    setTimeout(() => {
+      setIsOAuthLoading(false)
+      toast.error('Could not reach the sign-in service. Please try again.')
+    }, 8000)
   }
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
+    setIsEmailLoading(true)
     try {
       const kcUrl    = process.env.NEXT_PUBLIC_KEYCLOAK_URL       ?? 'http://localhost:8080'
       const kcRealm  = process.env.NEXT_PUBLIC_KEYCLOAK_REALM     ?? 'pubflow'
@@ -53,7 +73,7 @@ export default function LoginPage() {
     } catch {
       toast.error('Login failed. Please try again.')
     } finally {
-      setIsLoading(false)
+      setIsEmailLoading(false)
     }
   }
 
@@ -72,13 +92,13 @@ export default function LoginPage() {
             {/* SSO */}
             <button
               onClick={handleOAuthLogin}
-              disabled={isLoading}
+              disabled={isOAuthLoading}
               className="w-full flex items-center justify-center gap-2 rounded-lg border-2 border-gray-300 bg-white px-4 py-3 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-6"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0z" />
               </svg>
-              Sign in with SSO
+              {isOAuthLoading ? 'Redirecting…' : 'Sign in with SSO'}
             </button>
 
             <div className="mb-6 flex items-center">
@@ -142,11 +162,11 @@ export default function LoginPage() {
 
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isEmailLoading}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-2.5 font-medium text-white hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
               >
-                {isLoading ? 'Signing in…' : 'Sign In'}
-                {!isLoading && <ArrowRight className="h-4 w-4" />}
+                {isEmailLoading ? 'Signing in…' : 'Sign In'}
+                {!isEmailLoading && <ArrowRight className="h-4 w-4" />}
               </button>
             </form>
 
