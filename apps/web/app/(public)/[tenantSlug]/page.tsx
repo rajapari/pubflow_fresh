@@ -1,6 +1,6 @@
 'use client'
 
-import { BookOpen, ExternalLink, Rss } from 'lucide-react'
+import { AlertTriangle, BookOpen, ExternalLink, Rss } from 'lucide-react'
 import Link from 'next/link'
 import { trpc } from '@/components/providers'
 
@@ -11,6 +11,24 @@ export default function JournalHomePage({ params }: { params: { tenantSlug: stri
   if (journalQ.isLoading) return (
     <div className="flex items-center justify-center py-32">
       <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+    </div>
+  )
+
+  // Only a real NOT_FOUND from the API means the journal doesn't exist —
+  // anything else (network down, a 500, the API unreachable) is a load
+  // failure, not a missing journal, and showing the same "not found"
+  // message for both tells a visitor to give up on a journal that's
+  // actually fine, just temporarily unreachable.
+  if (journalQ.error && journalQ.error.data?.code !== 'NOT_FOUND') return (
+    <div className="mx-auto max-w-2xl px-6 py-32 text-center">
+      <AlertTriangle size={40} className="mx-auto mb-4 text-amber-400" />
+      <p className="text-gray-500">Couldn&apos;t load this journal. Please try again.</p>
+      <button
+        onClick={() => journalQ.refetch()}
+        className="mt-4 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      >
+        Retry
+      </button>
     </div>
   )
 

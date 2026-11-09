@@ -75,8 +75,8 @@ export default function LandingPage() {
               </p>
               <div className="mt-10 flex items-center justify-center gap-4">
                 <Link
-                  href="/login?demo=true"
-                  className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-4 font-semibold text-white shadow-lg hover:shadow-xl transition-shadow"
+                  href="/demo"
+                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-4 font-semibold text-white shadow-lg hover:shadow-xl transition-shadow"
                 >
                   Try Demo <ArrowRight className="h-5 w-5" />
                 </Link>
