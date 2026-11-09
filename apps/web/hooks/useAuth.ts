@@ -4,7 +4,7 @@ import Keycloak from 'keycloak-js'
 import { saveAuthToken, clearAuthToken, getAuthToken, getTokenExpiry, refreshAccessToken } from '@/lib/auth'
 
 let kc: Keycloak | null = null
-let kcInitialized = false
+let kcInitPromise: Promise<boolean> | null = null
 
 function getKC() {
   if (!kc) kc = new Keycloak({
@@ -13,6 +13,24 @@ function getKC() {
     clientId: process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID ?? 'pubflow-web',
   })
   return kc
+}
+
+// `Keycloak.init()` may only be called once per instance, but React 18's
+// Strict Mode (on by default in Next.js dev) deliberately double-invokes
+// effects — mount, discard, mount again. A plain boolean guard here used
+// to make the *second* invocation take a synchronous shortcut
+// (`k.authenticated` read immediately) instead of awaiting the real
+// exchange the *first* invocation had already kicked off — and since that
+// real exchange is async, the shortcut routinely read `false` before it
+// resolved, losing a login that had just actually succeeded. Confirmed
+// live: intermittent (not every time) failures on /auth/callback despite
+// Keycloak having issued a real authorization code. Sharing the init
+// *promise* itself means every caller — the double-invoked effect below,
+// and the login button's handler — awaits the exact same outcome instead
+// of racing a second, premature one.
+function ensureKeycloakInit(options: Parameters<Keycloak['init']>[0]): Promise<boolean> {
+  if (!kcInitPromise) kcInitPromise = getKC().init(options)
+  return kcInitPromise
 }
 
 export interface AuthUser {
@@ -150,19 +168,12 @@ export function useAuth() {
     }
 
     const k = getKC()
-
-    let initPromise: Promise<boolean>
-    if (kcInitialized) {
-      initPromise = Promise.resolve(k.authenticated ?? false)
-    } else {
-      kcInitialized = true
-      initPromise = k.init({
-        onLoad: 'check-sso',
-        pkceMethod: 'S256',
-        checkLoginIframe: false,
-        silentCheckSsoFallback: false,
-      })
-    }
+    const initPromise = ensureKeycloakInit({
+      onLoad: 'check-sso',
+      pkceMethod: 'S256',
+      checkLoginIframe: false,
+      silentCheckSsoFallback: false,
+    })
 
     let intervalId: ReturnType<typeof setInterval> | null = null
 
@@ -186,14 +197,38 @@ export function useAuth() {
     return () => { if (intervalId !== null) clearInterval(intervalId) }
   }, [])
 
-  const login = useCallback(
-    () => getKC().login({ redirectUri: `${window.location.origin}/auth/callback` }),
-    []
-  )
+  // `keycloak-js`'s `login()` only builds a PKCE code_challenge when the
+  // instance's `pkceMethod` is already set — and that's set by `.init()`,
+  // never by `.login()` itself (confirmed against keycloak-js's own
+  // source: pkceMethod lives on KeycloakInitOptions, not
+  // KeycloakLoginOptions). On this page, `.init()` has normally never run
+  // yet (the effect above only calls it on /auth/callback), so a bare
+  // `getKC().login(...)` silently omits code_challenge entirely — Keycloak
+  // then rejects the request outright ("Missing parameter:
+  // code_challenge_method") since pubflow-web requires PKCE. Confirmed
+  // live before this fix: every SSO attempt failed this way.
+  //
+  // Fix: initialize (idempotently — see ensureKeycloakInit) with
+  // onLoad: 'login-required' — init() itself performs the (correctly
+  // PKCE'd) redirect when the user isn't already authenticated, so this
+  // call normally never resolves; the page navigates away first. If
+  // something *else* already initialized this singleton earlier in the
+  // same SPA session, pkceMethod is already set and ensureKeycloakInit
+  // just returns that same (resolved) promise instead of calling init()
+  // a second time.
+  const login = useCallback(async () => {
+    await ensureKeycloakInit({
+      onLoad: 'login-required',
+      pkceMethod: 'S256',
+      redirectUri: `${window.location.origin}/auth/callback`,
+      checkLoginIframe: false,
+      silentCheckSsoFallback: false,
+    })
+  }, [])
 
   const logout = useCallback(() => {
     clearAuthToken()
-    if (kcInitialized) {
+    if (kcInitPromise) {
       try {
         getKC().logout({ redirectUri: window.location.origin })
         return

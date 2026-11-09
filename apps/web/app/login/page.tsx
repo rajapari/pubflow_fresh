@@ -1,80 +1,43 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Header } from '@/components/Header'
 import { Footer } from '@/components/Footer'
-import { ArrowRight, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
-import { saveAuthToken, saveRefreshToken } from '@/lib/auth'
+import { useAuth } from '@/hooks/useAuth'
 
+// SSO is the only login path, deliberately: the previous email/password
+// form posted the password straight to Keycloak via the resource-owner
+// password grant (ROPC) from this client — that skips Keycloak's own
+// hosted login page, and with it MFA, brute-force lockout, and the
+// password-reset flow, and the resulting token was stored in
+// localStorage and a JS-readable cookie. pubflow-web now has
+// directAccessGrantsEnabled: false in Keycloak, so that grant would be
+// rejected even if this form still existed.
 export default function LoginPage() {
-  const router = useRouter()
-  const [email,         setEmail]         = useState('')
-  const [password,      setPassword]      = useState('')
-  const [showPw,        setShowPw]        = useState(false)
-  // Separate state per button: they used to share one `isLoading`, so
-  // clicking SSO (which never resets it — see below) left the *email
-  // form's* submit button stuck reading "Signing in…" and disabled, not
-  // the SSO button the user actually clicked.
-  const [isOAuthLoading, setIsOAuthLoading] = useState(false)
-  const [isEmailLoading, setIsEmailLoading] = useState(false)
+  const { login } = useAuth()
+  const [isLoading, setIsLoading] = useState(false)
 
-  const handleOAuthLogin = () => {
-    setIsOAuthLoading(true)
+  const handleSignIn = async () => {
+    setIsLoading(true)
     try {
-      const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL    || 'http://localhost:8080'
-      const realm       = process.env.NEXT_PUBLIC_KEYCLOAK_REALM  || 'pubflow'
-      const clientId    = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID || 'pubflow-web'
-      const redirectUri = `${window.location.origin}/auth/callback`
-      window.location.href = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&response_mode=query&scope=openid`
+      await login()
     } catch {
-      setIsOAuthLoading(false)
+      setIsLoading(false)
       toast.error('Could not start sign-in. Please try again.')
       return
     }
-    // A successful redirect navigates away and unmounts this page, so
+    // A successful call above navigates away and unmounts this page
+    // (Keycloak's own init()/login() redirect does this directly), so
     // nothing below normally runs. If it's still here after a few
     // seconds, the navigation never actually happened (Keycloak
     // unreachable, a blocked redirect, etc.) — surface that instead of
     // leaving the button disabled with no way out.
     setTimeout(() => {
-      setIsOAuthLoading(false)
+      setIsLoading(false)
       toast.error('Could not reach the sign-in service. Please try again.')
     }, 8000)
-  }
-
-  const handleEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsEmailLoading(true)
-    try {
-      const kcUrl    = process.env.NEXT_PUBLIC_KEYCLOAK_URL       ?? 'http://localhost:8080'
-      const kcRealm  = process.env.NEXT_PUBLIC_KEYCLOAK_REALM     ?? 'pubflow'
-      const kcClient = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID ?? 'pubflow-web'
-
-      const res  = await fetch(`${kcUrl}/realms/${kcRealm}/protocol/openid-connect/token`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ grant_type: 'password', client_id: kcClient, username: email, password }),
-      })
-      const data = await res.json()
-
-      if (!data.access_token) {
-        const raw = data.error_description ?? data.error ?? 'Invalid email or password'
-        toast.error(raw === 'Invalid user credentials' ? 'Invalid email or password' : raw)
-        return
-      }
-
-      saveAuthToken(data.access_token)
-      if (data.refresh_token) saveRefreshToken(data.refresh_token)
-      toast.success('Signed in successfully!')
-      router.push(new URLSearchParams(window.location.search).get('redirect') ?? '/dashboard')
-    } catch {
-      toast.error('Login failed. Please try again.')
-    } finally {
-      setIsEmailLoading(false)
-    }
   }
 
   return (
@@ -89,92 +52,27 @@ export default function LoginPage() {
               <p className="mt-2 text-gray-600">Sign in to your PubFlow account</p>
             </div>
 
-            {/* SSO */}
             <button
-              onClick={handleOAuthLogin}
-              disabled={isOAuthLoading}
-              className="w-full flex items-center justify-center gap-2 rounded-lg border-2 border-gray-300 bg-white px-4 py-3 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-6"
+              onClick={handleSignIn}
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-3 font-medium text-white hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0z" />
               </svg>
-              {isOAuthLoading ? 'Redirecting…' : 'Sign in with SSO'}
+              {isLoading ? 'Redirecting…' : 'Sign In'}
             </button>
-
-            <div className="mb-6 flex items-center">
-              <div className="flex-1 border-t border-gray-200" />
-              <span className="px-3 text-sm text-gray-500">Or continue with email</span>
-              <div className="flex-1 border-t border-gray-200" />
-            </div>
-
-            <form onSubmit={handleEmailLogin} className="space-y-4">
-              {/* Email */}
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
-                  <input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                    Password
-                  </label>
-                  <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 font-medium">
-                    Forgot password?
-                  </Link>
-                </div>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
-                  <input
-                    id="password"
-                    type={showPw ? 'text' : 'password'}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full rounded-lg border border-gray-300 bg-white pl-10 pr-10 py-2.5 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw(v => !v)}
-                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
-                    tabIndex={-1}
-                    aria-label={showPw ? 'Hide password' : 'Show password'}
-                  >
-                    {showPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isEmailLoading}
-                className="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-2.5 font-medium text-white hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
-              >
-                {isEmailLoading ? 'Signing in…' : 'Sign In'}
-                {!isEmailLoading && <ArrowRight className="h-4 w-4" />}
-              </button>
-            </form>
 
             <div className="mt-6 text-center">
               <p className="text-gray-600">
                 Don&apos;t have an account?{' '}
                 <Link href="/signup" className="font-medium text-blue-600 hover:text-blue-700">
                   Sign up free
+                </Link>
+              </p>
+              <p className="mt-2">
+                <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+                  Forgot password?
                 </Link>
               </p>
             </div>
