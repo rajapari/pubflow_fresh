@@ -17,7 +17,11 @@ data:
   # Copied from services/keycloak/realm-export.json (Helm's .Files can only
   # read inside the chart directory, not ../../services) — infra/helm/files/
   # keycloak-realm-export.json is the copy actually used here. Keep both in
-  # sync if the realm changes; local docker-compose still reads the original.
+  # sync if the realm changes — with ONE deliberate exception: the local
+  # copy also defines a pubflow-test-cli client (ROPC-enabled, for
+  # scripts/e2e-pressure-test.mjs) that must NEVER be mirrored here. Both
+  # copies do have directAccessGrantsEnabled: false on pubflow-web itself —
+  # that part stays identical; only the extra test client doesn't.
   realm-export.json: |
 {{ .Files.Get "files/keycloak-realm-export.json" | indent 4 }}
 ---

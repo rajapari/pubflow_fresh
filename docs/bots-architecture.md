@@ -388,6 +388,21 @@ All new endpoints are tenant-scoped and role-checked (author vs production staff
 | Proofreader | proofreader@demo-journal.local | ProofReader@Demo2025! |
 | Super Admin (pubflow-admin tenant) | admin@pubflow.local | Admin@PubFlow2025! |
 
+**How automation logs these accounts in:** the browser client (`pubflow-web`)
+has `directAccessGrantsEnabled: false` — the password grant was disabled
+deliberately (it skipped Keycloak's own hosted login page, and with it
+MFA/brute-force lockout/password-reset, and the SPA stored the resulting
+token in `localStorage` and a JS-readable cookie). Real users and
+`e2e/login.spec.ts` go through the actual SSO redirect to Keycloak's hosted
+login page instead — the only path left. Scripts that need a token without
+a browser (`scripts/e2e-pressure-test.mjs`) use a separate client,
+`pubflow-test-cli` (confidential, ROPC enabled, secret in
+`KEYCLOAK_TEST_CLIENT_SECRET`) — **local/CI dev only**, defined in
+`services/keycloak/realm-export.json` but deliberately *not* mirrored into
+`infra/helm/files/keycloak-realm-export.json` (the production copy), since
+a ROPC-capable client is exactly the surface this change removes and must
+never exist outside a disposable local/CI Keycloak instance.
+
 ---
 
 ## 9. Testing

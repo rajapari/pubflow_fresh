@@ -57,7 +57,7 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
-      "directAccessGrantsEnabled": true
+      "directAccessGrantsEnabled": false
     },
     {
       "clientId": "pubflow-api",
@@ -66,6 +66,16 @@
       "serviceAccountsEnabled": true,
       "standardFlowEnabled": false,
       "protocol": "openid-connect"
+    },
+    {
+      "clientId": "pubflow-test-cli",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "protocol": "openid-connect",
+      "secret": "pubflow-test-cli-secret-local-dev-only"
     }
   ],
   "smtpServer": {

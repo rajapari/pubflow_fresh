@@ -11,6 +11,13 @@ export default defineConfig({
   testDir: '.',
   timeout: 30_000,
   retries: 0,
+  // Serial, not parallel: login.spec.ts drives real interactive Keycloak
+  // logins (full redirects through its hosted login page), and running
+  // several of those at once against one local dev Keycloak instance is
+  // genuinely flaky — confirmed live (2 workers: 2 spurious failures; 1
+  // worker: 4/4 clean, twice). This test suite isn't large enough for the
+  // serialization cost to matter.
+  workers: 1,
   reporter: [['list']],
   use: {
     // localhost, not 127.0.0.1: Keycloak's pubflow-web client CORS allowlist

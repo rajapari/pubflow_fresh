@@ -1,15 +1,27 @@
 #!/usr/bin/env node
 // ── End-to-end pressure test ──────────────────────────────
 // Drives the live local stack (pnpm dev, http://127.0.0.1:3001) as real
-// users via Keycloak ROPC + raw tRPC HTTP calls. Covers the full editorial
-// lifecycle, RBAC, validation, and known edge cases. Never throws out of a
-// single test — every check is isolated so one failure doesn't stop the run.
+// users via raw tRPC HTTP calls. Covers the full editorial lifecycle,
+// RBAC, validation, and known edge cases. Never throws out of a single
+// test — every check is isolated so one failure doesn't stop the run.
 // Usage: node scripts/e2e-pressure-test.mjs
+//
+// Auth: mints tokens via pubflow-test-cli (ROPC, confidential, local/CI
+// dev only — services/keycloak/realm-export.json), NOT pubflow-web. The
+// real browser client has directAccessGrantsEnabled: false — the password
+// grant was deliberately disabled there (see docs/bots-architecture.md);
+// real users and e2e/login.spec.ts go through the actual Keycloak-hosted
+// SSO redirect instead. This script only needs *a* valid token for each
+// already-created test account, not to exercise the browser login UX, so
+// a separate test-only client is the right tool, not a reason to make
+// every one of these calls drive a real browser.
 
 const API = 'http://127.0.0.1:3001'
 const KC  = 'http://127.0.0.1:8080'
 const MAILPIT = 'http://127.0.0.1:8025'
 const REALM = 'pubflow'
+const TEST_CLIENT_ID     = process.env.KEYCLOAK_TEST_CLIENT_ID     ?? 'pubflow-test-cli'
+const TEST_CLIENT_SECRET = process.env.KEYCLOAK_TEST_CLIENT_SECRET ?? 'pubflow-test-cli-secret-local-dev-only'
 
 async function mailCountTo(email) {
   const res = await fetch(`${MAILPIT}/api/v1/search?query=${encodeURIComponent('to:' + email)}`)
@@ -36,7 +48,7 @@ async function login(who) {
   const res = await fetch(`${KC}/realms/${REALM}/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'password', client_id: 'pubflow-web', username: email, password }),
+    body: new URLSearchParams({ grant_type: 'password', client_id: TEST_CLIENT_ID, client_secret: TEST_CLIENT_SECRET, username: email, password }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(`login(${who}) failed: ${res.status} ${JSON.stringify(data)}`)
@@ -48,7 +60,7 @@ async function loginBad(email, password) {
   const res = await fetch(`${KC}/realms/${REALM}/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'password', client_id: 'pubflow-web', username: email, password }),
+    body: new URLSearchParams({ grant_type: 'password', client_id: TEST_CLIENT_ID, client_secret: TEST_CLIENT_SECRET, username: email, password }),
   })
   return res.status
 }
@@ -129,6 +141,17 @@ async function main() {
   await test('auth: no token on protected procedure -> UNAUTHORIZED', async () => {
     const r = await trpc(null, 'query', 'submission.list', { page: 1, limit: 1 })
     expect('auth: anonymous call rejected', errCode(r) === 'UNAUTHORIZED', `status=${r.status} code=${errCode(r)}`)
+  })
+
+  await test('auth: pubflow-web (the real browser client) rejects the password grant entirely', async () => {
+    const res = await fetch(`${KC}/realms/${REALM}/protocol/openid-connect/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'password', client_id: 'pubflow-web', username: ACCOUNTS.editor.email, password: ACCOUNTS.editor.password }),
+    })
+    const body = await res.json().catch(() => ({}))
+    expect('auth: pubflow-web ROPC disabled', res.status === 400 && body.error === 'unauthorized_client',
+      `status=${res.status} body=${JSON.stringify(body)}`)
   })
 
   await test('auth: garbage bearer token rejected', async () => {
@@ -428,8 +451,13 @@ async function main() {
     expect('production: status TYPESETTING', r.body?.result?.data?.status === 'TYPESETTING', JSON.stringify(r.body).slice(0, 300))
   })
 
-  await test('production: typesetter triggers a PANDOC typesetting job', async () => {
+  await test('regression: PANDOC engine still correctly rejects PDF output (no TeX engine in that service)', async () => {
     const r = await m('typesetter', 'typesetting.triggerJob', { submissionId, engine: 'PANDOC', outputFormat: 'PDF_WEB' })
+    expect('regression: pandoc+PDF rejected', errCode(r) === 'BAD_REQUEST' && /not supported by Pandoc/.test(errMsg(r)), `status=${r.status} code=${errCode(r)} msg=${errMsg(r)}`)
+  })
+
+  await test('production: typesetter triggers a LATEX typesetting job (the real PDF path)', async () => {
+    const r = await m('typesetter', 'typesetting.triggerJob', { submissionId, engine: 'LATEX', outputFormat: 'PDF_WEB' })
     expect('production: typesetting job queued', r.body?.result?.data?.status === 'QUEUED', JSON.stringify(r.body).slice(0, 300))
   })
 
@@ -465,11 +493,13 @@ async function main() {
     expect('publish: submission status PUBLISHED', check.body?.result?.data?.status === 'PUBLISHED', check.body?.result?.data?.status)
   })
 
-  await sleep(2500)
   await test('regression: PUBLISHED-stage bots (promo-kit / archival) dispatch via issue.publish', async () => {
-    const check = await q('editor', 'submission.byId', { id: submissionId })
-    const sub = check.body?.result?.data
-    const hasPromoKit = !!sub?.promoKit
+    let hasPromoKit = false
+    for (let i = 0; i < 15 && !hasPromoKit; i++) {
+      await sleep(1000)
+      const check = await q('editor', 'submission.byId', { id: submissionId })
+      hasPromoKit = !!check.body?.result?.data?.promoKit
+    }
     expect('regression: promoKit populated after issue.publish', hasPromoKit,
       hasPromoKit ? 'promoKit present' : 'promoKit MISSING — issue.publish is not calling dispatchStageBots')
   })
